@@ -1,0 +1,14 @@
+{
+  "domain": "qr_guest_access",
+  "name": "QR Guest Access",
+  "codeowners": ["@xtiapex"],
+  "config_flow": true,
+  "dependencies": ["http", "frontend", "panel_custom", "websocket_api"],
+  "documentation": "https://github.com/xtiapex/HomeAssitant-QR-guest-Access",
+  "integration_type": "service",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/xtiapex/HomeAssitant-QR-guest-Access/issues",
+  "requirements": ["segno>=1.6.1"],
+  "single_config_entry": true,
+  "version": "1.0.0"
+}

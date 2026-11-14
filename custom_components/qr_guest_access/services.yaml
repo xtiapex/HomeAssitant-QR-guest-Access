@@ -1,0 +1,43 @@
+create_qr:
+  fields:
+    name:
+      required: true
+      example: "Idraulico"
+      selector:
+        text:
+    valid_from:
+      required: false
+      selector:
+        datetime:
+    valid_until:
+      required: false
+      selector:
+        datetime:
+    max_uses:
+      required: false
+      default: 1
+      selector:
+        number:
+          min: 1
+          max: 999
+          mode: box
+    unlimited:
+      required: false
+      default: false
+      selector:
+        boolean:
+
+revoke_qr:
+  fields:
+    id:
+      required: true
+      example: "a1b2c3d4"
+      selector:
+        text:
+
+simulate_scan:
+  fields:
+    code:
+      required: true
+      selector:
+        text:

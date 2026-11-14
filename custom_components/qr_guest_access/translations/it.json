@@ -1,0 +1,70 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "QR Guest Access",
+        "description": "Scegli il lettore QR, la porta e, se vuoi, la telecamera da mostrare nel pannello.",
+        "data": {
+          "reader_entity": "Lettore QR",
+          "door_entity": "Porta (relè Shelly)",
+          "camera_entity": "Telecamera (opzionale)",
+          "open_seconds": "Secondi di apertura"
+        },
+        "data_description": {
+          "reader_entity": "L'entità image_processing creata dall'integrazione QR Code (es. image_processing.qr_porta).",
+          "door_entity": "L'interruttore della Shelly 1 collegata alla serratura.",
+          "camera_entity": "Serve solo per l'anteprima nel pannello.",
+          "open_seconds": "Per quanto tempo il relè resta acceso dopo un QR valido."
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Impostazioni QR Guest Access",
+        "data": {
+          "reader_entity": "Lettore QR",
+          "door_entity": "Porta (relè Shelly)",
+          "camera_entity": "Telecamera (opzionale)",
+          "open_seconds": "Secondi di apertura"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "active_tokens": { "name": "QR attivi" },
+      "granted": { "name": "Accessi consentiti" },
+      "denied": { "name": "Accessi negati" },
+      "last_access": { "name": "Ultimo accesso" }
+    }
+  },
+  "services": {
+    "create_qr": {
+      "name": "Crea QR",
+      "description": "Crea un nuovo QR di accesso. Senza altre indicazioni è monouso e valido da subito.",
+      "fields": {
+        "name": { "name": "Nome", "description": "Nome del QR, ad esempio quello dell'ospite." },
+        "valid_from": { "name": "Valido dal", "description": "Inizio validità. Se vuoto, da subito." },
+        "valid_until": { "name": "Valido fino al", "description": "Fine validità. Obbligatoria se gli accessi sono illimitati." },
+        "max_uses": { "name": "Numero di accessi", "description": "Quante volte può essere usato." },
+        "unlimited": { "name": "Accessi illimitati", "description": "Ignora il numero di accessi; richiede una data di fine." }
+      }
+    },
+    "revoke_qr": {
+      "name": "Revoca QR",
+      "description": "Rende inutilizzabile un QR.",
+      "fields": {
+        "id": { "name": "ID", "description": "L'ID del QR (lo restituisce 'Crea QR')." }
+      }
+    },
+    "simulate_scan": {
+      "name": "Simula scansione",
+      "description": "Esegue la stessa procedura di una lettura della telecamera.",
+      "fields": {
+        "code": { "name": "Codice", "description": "Il testo che avrebbe letto la telecamera." }
+      }
+    }
+  }
+}

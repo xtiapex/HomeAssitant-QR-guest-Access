@@ -1,0 +1,70 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "QR Guest Access",
+        "description": "Choose the QR reader, the door and, optionally, the camera shown in the panel.",
+        "data": {
+          "reader_entity": "QR reader",
+          "door_entity": "Door (Shelly relay)",
+          "camera_entity": "Camera (optional)",
+          "open_seconds": "Seconds open"
+        },
+        "data_description": {
+          "reader_entity": "The image_processing entity created by the QR Code integration (e.g. image_processing.qr_door).",
+          "door_entity": "The switch of the Shelly 1 wired to the lock.",
+          "camera_entity": "Only used for the preview in the panel.",
+          "open_seconds": "How long the relay stays on after a valid QR code."
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "QR Guest Access settings",
+        "data": {
+          "reader_entity": "QR reader",
+          "door_entity": "Door (Shelly relay)",
+          "camera_entity": "Camera (optional)",
+          "open_seconds": "Seconds open"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "active_tokens": { "name": "Active QR codes" },
+      "granted": { "name": "Accesses granted" },
+      "denied": { "name": "Accesses denied" },
+      "last_access": { "name": "Last access" }
+    }
+  },
+  "services": {
+    "create_qr": {
+      "name": "Create QR",
+      "description": "Creates a new access QR code. Single-use and valid immediately unless told otherwise.",
+      "fields": {
+        "name": { "name": "Name", "description": "Name of the QR code, e.g. the guest." },
+        "valid_from": { "name": "Valid from", "description": "Start of validity. Empty means now." },
+        "valid_until": { "name": "Valid until", "description": "End of validity. Required for unlimited accesses." },
+        "max_uses": { "name": "Number of accesses", "description": "How many times it can be used." },
+        "unlimited": { "name": "Unlimited accesses", "description": "Ignores the number of accesses; requires an end date." }
+      }
+    },
+    "revoke_qr": {
+      "name": "Revoke QR",
+      "description": "Makes a QR code unusable.",
+      "fields": {
+        "id": { "name": "ID", "description": "The QR code ID (returned by Create QR)." }
+      }
+    },
+    "simulate_scan": {
+      "name": "Simulate scan",
+      "description": "Runs the same procedure as a camera reading.",
+      "fields": {
+        "code": { "name": "Code", "description": "The text the camera would have read." }
+      }
+    }
+  }
+}
