@@ -249,6 +249,19 @@ class AccessEngine:
         self._changed()
         return True
 
+    def restore_token(self, token_id: str) -> bool:
+        """Riabilita un token revocato. False se non esiste o non era revocato.
+
+        Il token torna com'era: stessi accessi residui e stessa finestra di
+        validità. Se nel frattempo è scaduto o esaurito, resterà tale.
+        """
+        record = self._data["tokens"].get(token_id)
+        if record is None or not record["revoked"]:
+            return False
+        record["revoked"] = False
+        self._changed()
+        return True
+
     def delete_token(self, token_id: str) -> bool:
         record = self._data["tokens"].pop(token_id, None)
         if record is None:

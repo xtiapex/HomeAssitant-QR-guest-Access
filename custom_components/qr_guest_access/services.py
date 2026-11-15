@@ -13,6 +13,7 @@ from .manager import Manager
 
 SERVICE_CREATE_QR = "create_qr"
 SERVICE_REVOKE_QR = "revoke_qr"
+SERVICE_RESTORE_QR = "restore_qr"
 SERVICE_SIMULATE_SCAN = "simulate_scan"
 
 CREATE_SCHEMA = vol.Schema(
@@ -56,6 +57,11 @@ async def _handle_revoke(call: ServiceCall) -> None:
         raise ServiceValidationError("Token non trovato.")
 
 
+async def _handle_restore(call: ServiceCall) -> None:
+    if not _manager(call.hass).engine.restore_token(call.data["id"]):
+        raise ServiceValidationError("Token non trovato o non revocato.")
+
+
 async def _handle_simulate(call: ServiceCall) -> ServiceResponse:
     manager = _manager(call.hass)
     result = await manager.async_simulate(None, call.data["code"])
@@ -75,6 +81,9 @@ def async_register_services(hass: HomeAssistant) -> None:
     )
     hass.services.async_register(
         DOMAIN, SERVICE_REVOKE_QR, _handle_revoke, schema=REVOKE_SCHEMA
+    )
+    hass.services.async_register(
+        DOMAIN, SERVICE_RESTORE_QR, _handle_restore, schema=REVOKE_SCHEMA
     )
     hass.services.async_register(
         DOMAIN,

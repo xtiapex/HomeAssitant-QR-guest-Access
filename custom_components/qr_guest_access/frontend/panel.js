@@ -478,7 +478,9 @@ class QRGuestAccessPanel extends HTMLElement {
         </div>
         <div class="actions">
           ${live ? `<button class="small" data-act="qr" data-id="${esc(t.id)}">Mostra QR</button>` : ""}
-          ${t.status !== "revoked" ? `<button class="small danger ${this._confirmKey === rKey ? "armed" : ""}" data-act="revoke" data-id="${esc(t.id)}">${this._confirmKey === rKey ? "Conferma?" : "Revoca"}</button>` : ""}
+          ${t.status === "revoked"
+            ? `<button class="small" data-act="restore" data-id="${esc(t.id)}">Riabilita</button>`
+            : `<button class="small danger ${this._confirmKey === rKey ? "armed" : ""}" data-act="revoke" data-id="${esc(t.id)}">${this._confirmKey === rKey ? "Conferma?" : "Revoca"}</button>`}
           <button class="small danger ${this._confirmKey === dKey ? "armed" : ""}" data-act="delete" data-id="${esc(t.id)}">${this._confirmKey === dKey ? "Conferma?" : "Elimina"}</button>
         </div>
       </div>`;
@@ -638,6 +640,9 @@ class QRGuestAccessPanel extends HTMLElement {
         const res = await this._hass.callWS({ type: "qr_guest_access/qr", token_id: id });
         const token = this._data.tokens.find((t) => t.id === id);
         this._openModal(token ? token.name : "QR", res);
+      } else if (action === "restore") {
+        await this._hass.callWS({ type: "qr_guest_access/restore", token_id: id });
+        await this._refresh();
       } else if (action === "revoke" || action === "delete") {
         if (!this._armConfirm(`${action}:${id}`)) return;
         await this._hass.callWS({ type: `qr_guest_access/${action}`, token_id: id });

@@ -198,6 +198,44 @@ class TestScanRules(Base):
         self.assertLess(len(json.dumps(self.eng.get_state()["logs"][0])), 400)
 
 
+class TestRestore(Base):
+    async def test_restore_revoked_token_works_again(self):
+        public, code = self.token(max_uses=3)
+        await self.scan(code)  # 2 rimasti
+        self.eng.revoke_token(public["id"])
+        self.assertEqual((await self.scan(code)).result, engine.RESULT_REVOKED)
+        self.assertTrue(self.eng.restore_token(public["id"]))
+        state = {t["id"]: t for t in self.eng.get_state()["tokens"]}[public["id"]]
+        self.assertEqual(state["status"], engine.STATUS_ACTIVE)
+        self.assertEqual(state["uses_left"], 2)  # gli accessi non vengono ridati né tolti
+        self.assertEqual((await self.scan(code)).result, engine.RESULT_GRANTED)
+
+    def test_restore_unknown_or_not_revoked_is_refused(self):
+        public, _ = self.token()
+        self.assertFalse(self.eng.restore_token("nope"))
+        self.assertFalse(self.eng.restore_token(public["id"]))  # non era revocato
+
+    async def test_restored_token_that_expired_stays_expired(self):
+        public, code = self.token(max_uses=5, valid_until=T0 + timedelta(hours=1))
+        self.eng.revoke_token(public["id"])
+        self.clock.advance(hours=2)
+        self.assertTrue(self.eng.restore_token(public["id"]))
+        self.assertEqual((await self.scan(code)).result, engine.RESULT_EXPIRED)
+
+    async def test_restored_exhausted_token_stays_exhausted(self):
+        public, code = self.token(max_uses=1)
+        await self.scan(code)
+        self.eng.revoke_token(public["id"])
+        self.assertTrue(self.eng.restore_token(public["id"]))
+        self.assertEqual((await self.scan(code)).result, engine.RESULT_EXHAUSTED)
+
+    def test_restore_is_persisted(self):
+        public, _ = self.token()
+        self.eng.revoke_token(public["id"])
+        self.eng.restore_token(public["id"])
+        self.assertFalse(self.saved[-1]["tokens"][public["id"]]["revoked"])
+
+
 class TestDoorAndModes(Base):
     async def test_door_failure_refunds_the_access(self):
         public, code = self.token(max_uses=2)

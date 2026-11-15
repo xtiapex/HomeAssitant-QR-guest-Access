@@ -59,6 +59,13 @@
         "id": { "name": "ID", "description": "L'ID del QR (lo restituisce 'Crea QR')." }
       }
     },
+    "restore_qr": {
+      "name": "Riabilita QR",
+      "description": "Riabilita un QR revocato. Torna com'era: se nel frattempo è scaduto o esaurito, resta tale.",
+      "fields": {
+        "id": { "name": "ID", "description": "L'ID del QR revocato." }
+      }
+    },
     "simulate_scan": {
       "name": "Simula scansione",
       "description": "Esegue la stessa procedura di una lettura della telecamera.",

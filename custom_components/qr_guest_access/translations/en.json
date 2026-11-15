@@ -59,6 +59,13 @@
         "id": { "name": "ID", "description": "The QR code ID (returned by Create QR)." }
       }
     },
+    "restore_qr": {
+      "name": "Restore QR",
+      "description": "Re-enables a revoked QR code. It returns as it was: if it has meanwhile expired or run out, it stays that way.",
+      "fields": {
+        "id": { "name": "ID", "description": "The ID of the revoked QR code." }
+      }
+    },
     "simulate_scan": {
       "name": "Simulate scan",
       "description": "Runs the same procedure as a camera reading.",

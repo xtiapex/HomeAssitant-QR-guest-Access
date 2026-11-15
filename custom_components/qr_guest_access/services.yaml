@@ -35,6 +35,14 @@ revoke_qr:
       selector:
         text:
 
+restore_qr:
+  fields:
+    id:
+      required: true
+      example: "a1b2c3d4"
+      selector:
+        text:
+
 simulate_scan:
   fields:
     code:

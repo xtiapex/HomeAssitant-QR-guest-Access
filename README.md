@@ -95,6 +95,7 @@ All'installazione la **modalità test è attiva**: i QR validi vengono riconosci
 - Lo stesso QR letto più volte in 10 secondi conta una volta sola.
 - I QR contengono solo un codice casuale (`QG-` + 32 caratteri), mai nomi o dati.
 - Un token non si modifica: se serve cambiare qualcosa, revoca e crea un nuovo QR.
+- Un QR revocato si può **riabilitare** dal pannello (pulsante *Riabilita*): torna com'era, con gli stessi accessi rimasti. Se nel frattempo è scaduto o esaurito, resta tale.
 - Gli orari nel pannello sono quelli del dispositivo che usi; nei servizi di HA, quelli del fuso orario di Home Assistant.
 
 ## 5. Per le automazioni
@@ -120,7 +121,7 @@ automation:
 
 **Sensori**: QR attivi, accessi consentiti, accessi negati, ultimo accesso.
 
-**Azioni**: `qr_guest_access.create_qr` (nome, valido dal/fino al, numero di accessi, illimitati; restituisce i dati del token), `qr_guest_access.revoke_qr`, `qr_guest_access.simulate_scan`. Senza indicazioni `create_qr` crea un QR **monouso**.
+**Azioni**: `qr_guest_access.create_qr` (nome, valido dal/fino al, numero di accessi, illimitati; restituisce i dati del token), `qr_guest_access.revoke_qr`, `qr_guest_access.restore_qr`, `qr_guest_access.simulate_scan`. Senza indicazioni `create_qr` crea un QR **monouso**.
 
 ## 6. Sicurezza: cosa sapere
 

@@ -109,6 +109,20 @@ def ws_revoke(hass: HomeAssistant, connection: websocket_api.ActiveConnection, m
 
 @websocket_api.require_admin
 @websocket_api.websocket_command(
+    {vol.Required("type"): "qr_guest_access/restore", vol.Required("token_id"): str}
+)
+@callback
+def ws_restore(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    if (manager := _get_manager(hass, connection, msg)) is None:
+        return
+    if not manager.engine.restore_token(msg["token_id"]):
+        connection.send_error(msg["id"], "not_found", "Token non trovato o non revocato.")
+        return
+    connection.send_result(msg["id"], {})
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
     {vol.Required("type"): "qr_guest_access/delete", vol.Required("token_id"): str}
 )
 @callback
@@ -172,6 +186,7 @@ def async_register_api(hass: HomeAssistant) -> None:
         ws_create,
         ws_qr,
         ws_revoke,
+        ws_restore,
         ws_delete,
         ws_simulate,
         ws_set_test_mode,
