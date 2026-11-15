@@ -73,14 +73,14 @@ async def ws_create(hass: HomeAssistant, connection: websocket_api.ActiveConnect
 
 @websocket_api.require_admin
 @websocket_api.websocket_command(
-    {vol.Required("type"): "qr_guest_access/qr", vol.Required("id"): str}
+    {vol.Required("type"): "qr_guest_access/qr", vol.Required("token_id"): str}
 )
 @websocket_api.async_response
 async def ws_qr(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
     if (manager := _get_manager(hass, connection, msg)) is None:
         return
     try:
-        filename, png = await manager.async_qr_png(msg["id"])
+        filename, png = await manager.async_qr_png(msg["token_id"])
     except ValueError as err:
         connection.send_error(msg["id"], "not_found", str(err))
         return
@@ -95,13 +95,13 @@ async def ws_qr(hass: HomeAssistant, connection: websocket_api.ActiveConnection,
 
 @websocket_api.require_admin
 @websocket_api.websocket_command(
-    {vol.Required("type"): "qr_guest_access/revoke", vol.Required("id"): str}
+    {vol.Required("type"): "qr_guest_access/revoke", vol.Required("token_id"): str}
 )
 @callback
 def ws_revoke(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
     if (manager := _get_manager(hass, connection, msg)) is None:
         return
-    if not manager.engine.revoke_token(msg["id"]):
+    if not manager.engine.revoke_token(msg["token_id"]):
         connection.send_error(msg["id"], "not_found", "Token non trovato.")
         return
     connection.send_result(msg["id"], {})
@@ -109,13 +109,13 @@ def ws_revoke(hass: HomeAssistant, connection: websocket_api.ActiveConnection, m
 
 @websocket_api.require_admin
 @websocket_api.websocket_command(
-    {vol.Required("type"): "qr_guest_access/delete", vol.Required("id"): str}
+    {vol.Required("type"): "qr_guest_access/delete", vol.Required("token_id"): str}
 )
 @callback
 def ws_delete(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
     if (manager := _get_manager(hass, connection, msg)) is None:
         return
-    if not manager.engine.delete_token(msg["id"]):
+    if not manager.engine.delete_token(msg["token_id"]):
         connection.send_error(msg["id"], "not_found", "Token non trovato.")
         return
     connection.send_result(msg["id"], {})

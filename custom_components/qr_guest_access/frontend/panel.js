@@ -122,6 +122,10 @@ const TEMPLATE = `
   .modal .box { background: var(--card-background-color); border-radius: 14px; padding: 20px; text-align: center;
                 max-width: 340px; width: 100%; }
   .modal h3 { margin: 0 0 12px; font-size: 16px; font-weight: 500; overflow-wrap: anywhere; }
+  .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 30; max-width: min(92vw, 520px);
+           background: var(--error-color, #db4437); color: #fff; padding: 12px 18px; border-radius: 10px; font-size: 14px;
+           box-shadow: 0 4px 16px rgba(0,0,0,.35); }
+  .toast[hidden] { display: none; }
   @media (max-width: 900px) {
     .grid { grid-template-columns: 1fr; }
     .stats { grid-template-columns: repeat(2, 1fr); }
@@ -195,6 +199,8 @@ const TEMPLATE = `
     <div id="logs"></div>
   </section>
 </div>
+
+<div class="toast" id="toast" role="alert" hidden></div>
 
 <div class="modal" id="modal" hidden>
   <div class="box">
@@ -534,6 +540,15 @@ class QRGuestAccessPanel extends HTMLElement {
     this._syncUnlimited();
   }
 
+  _toast(text) {
+    const el = this._q("#toast");
+    if (!el) return;
+    el.textContent = text;
+    el.hidden = false;
+    clearTimeout(this._toastTimer);
+    this._toastTimer = setTimeout(() => { el.hidden = true; }, 6000);
+  }
+
   _setMsg(selector, text, isError) {
     const el = this._q(selector);
     el.textContent = text || "";
@@ -620,17 +635,16 @@ class QRGuestAccessPanel extends HTMLElement {
   async _tokenAction(action, id) {
     try {
       if (action === "qr") {
-        const res = await this._hass.callWS({ type: "qr_guest_access/qr", id });
+        const res = await this._hass.callWS({ type: "qr_guest_access/qr", token_id: id });
         const token = this._data.tokens.find((t) => t.id === id);
         this._openModal(token ? token.name : "QR", res);
       } else if (action === "revoke" || action === "delete") {
         if (!this._armConfirm(`${action}:${id}`)) return;
-        await this._hass.callWS({ type: `qr_guest_access/${action}`, id });
+        await this._hass.callWS({ type: `qr_guest_access/${action}`, token_id: id });
         await this._refresh();
       }
     } catch (err) {
-      this._error = (err && err.message) || String(err);
-      this._renderBanner();
+      this._toast((err && err.message) || "Operazione non riuscita.");
     }
   }
 
@@ -657,7 +671,7 @@ class QRGuestAccessPanel extends HTMLElement {
     try {
       await this._hass.callWS({ type: "qr_guest_access/set_test_mode", enabled });
     } catch (err) {
-      this._error = (err && err.message) || String(err);
+      this._toast((err && err.message) || "Operazione non riuscita.");
     }
     await this._refresh();
   }
@@ -699,7 +713,7 @@ class QRGuestAccessPanel extends HTMLElement {
     try {
       await this._hass.callWS({ type: "qr_guest_access/clear_logs" });
     } catch (err) {
-      this._error = (err && err.message) || String(err);
+      this._toast((err && err.message) || "Operazione non riuscita.");
     }
     delete button.dataset.armed;
     button.textContent = "Cancella";
