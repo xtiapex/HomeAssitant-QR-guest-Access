@@ -6,7 +6,10 @@ from typing import Any
 
 import voluptuous as vol
 
+from aiohttp import web
+
 from homeassistant.components import websocket_api
+from homeassistant.components.http import HomeAssistantView
 from homeassistant.core import HomeAssistant, callback
 
 from .const import DOMAIN
@@ -356,8 +359,45 @@ async def ws_test_notify(hass: HomeAssistant, connection: websocket_api.ActiveCo
     connection.send_result(msg["id"], {"failed": failed})
 
 
+class QRImageView(HomeAssistantView):
+    """Scarica il PNG di un QR come vero file (serve all'app mobile, dove i data: URL non scaricano).
+
+    Si usa con un indirizzo firmato e a scadenza (auth/sign_path), generato dal pannello.
+    """
+
+    url = "/api/qr_guest_access/qr/{token_id}"
+    name = "api:qr_guest_access:qr"
+    requires_auth = True
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        self._hass = hass
+
+    async def get(self, request: web.Request, token_id: str) -> web.Response:
+        user = request.get("hass_user")
+        if user is None or not user.is_admin:
+            return web.Response(status=403)
+        manager: Manager | None = self._hass.data.get(DOMAIN)
+        if manager is None:
+            return web.Response(status=503)
+        try:
+            filename, png = await manager.async_qr_png(token_id)
+        except ValueError:
+            return web.Response(status=404)
+        except QRImageError:
+            return web.Response(status=500)
+        return web.Response(
+            body=png,
+            content_type="image/png",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Cache-Control": "no-store",
+            },
+        )
+
+
 def async_register_api(hass: HomeAssistant) -> None:
     """Registra i comandi (una sola volta, da async_setup)."""
+    hass.http.register_view(QRImageView(hass))
     for command in (
         ws_state,
         ws_create,

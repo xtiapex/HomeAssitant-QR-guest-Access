@@ -295,8 +295,8 @@ const TEMPLATE = `
   <div class="box">
     <h3 id="modalTitle"></h3>
     <div id="modalBody"></div>
-    <div class="actions"><button class="primary" id="modalDownload">Scarica PNG</button><button id="modalClose">Chiudi</button></div>
-    <div class="hint">Su smartphone puoi anche tenere premuto sull'immagine per salvarla o condividerla.</div>
+    <div class="actions"><button class="primary" id="modalDownload">Scarica PNG</button><button id="modalShare" hidden>Condividi</button><button id="modalClose">Chiudi</button></div>
+    <div class="hint">Dal telefono usa «Condividi» (WhatsApp, Foto…) oppure «Scarica PNG».</div>
   </div>
 </div>
 `;
@@ -424,7 +424,10 @@ class QRGuestAccessPanel extends HTMLElement {
     this._q("#editModal").addEventListener("click", (e) => { if (e.target.id === "editModal") this._closeEdit(); });
     this._q("#modal").addEventListener("click", (e) => { if (e.target.id === "modal") this._closeModal(); });
     this._q("#modalDownload").addEventListener("click", () => {
-      if (this._modalImage) this._download(this._modalImage.filename, this._modalImage.b64);
+      if (this._modalImage) this._download(this._modalImage);
+    });
+    this._q("#modalShare").addEventListener("click", () => {
+      if (this._modalImage) this._share(this._modalImage);
     });
     this.shadowRoot.addEventListener("keydown", (e) => { if (e.key === "Escape") { this._closeModal(); this._closeEdit(); this._closeDoor(); } });
 
@@ -439,7 +442,9 @@ class QRGuestAccessPanel extends HTMLElement {
       const btn = e.target.closest("button[data-res]");
       if (!btn) return;
       if (btn.dataset.res === "download" && this._lastCreated) {
-        this._download(this._lastCreated.filename, this._lastCreated.png_base64);
+        this._download(this._createdImage());
+      } else if (btn.dataset.res === "share" && this._lastCreated) {
+        this._share(this._createdImage());
       } else if (btn.dataset.res === "close") {
         this._q("#result").innerHTML = "";
       }
@@ -995,15 +1000,51 @@ class QRGuestAccessPanel extends HTMLElement {
       <img alt="QR di ${esc(t.name)}" src="data:image/png;base64,${res.png_base64}">
       <div class="name" style="margin-top:8px;font-weight:500">${esc(t.name)}</div>
       <div class="hint">${esc(uses)} · ${esc(validity)}</div>
-      <div class="actions"><button class="primary" data-res="download">Scarica PNG</button><button data-res="close">Chiudi</button></div>
-      <div class="hint">Su smartphone puoi anche tenere premuto sull'immagine per salvarla o condividerla.</div>
+      <div class="actions"><button class="primary" data-res="download">Scarica PNG</button>${this._canShare() ? `<button data-res="share">Condividi</button>` : ""}<button data-res="close">Chiudi</button></div>
+      <div class="hint">Dal telefono usa «Condividi» (WhatsApp, Foto…) oppure «Scarica PNG».</div>
     </div>`;
   }
 
-  _download(filename, b64) {
+  _createdImage() {
+    const r = this._lastCreated;
+    return { filename: r.filename, b64: r.png_base64, tokenId: r.token.id };
+  }
+
+  _canShare() {
+    try {
+      if (!navigator.share || !navigator.canShare) return false;
+      return navigator.canShare({ files: [new File([""], "qr.png", { type: "image/png" })] });
+    } catch (_e) {
+      return false;
+    }
+  }
+
+  async _share(img) {
+    try {
+      const bytes = Uint8Array.from(atob(img.b64), (c) => c.charCodeAt(0));
+      const file = new File([bytes], img.filename || "qr.png", { type: "image/png" });
+      await navigator.share({ files: [file], title: "QR di accesso" });
+    } catch (err) {
+      if (err && err.name === "AbortError") return;  // l'utente ha annullato
+      this._toast("Condivisione non riuscita: prova «Scarica PNG».");
+    }
+  }
+
+  async _download(img) {
+    // Indirizzo firmato (vale 1 minuto): è un vero file, e funziona anche nell'app mobile.
+    // Se non riesce, ripieghiamo sul download diretto dal browser.
+    let href = `data:image/png;base64,${img.b64}`;
+    if (img.tokenId) {
+      try {
+        const signed = await this._hass.callWS({
+          type: "auth/sign_path", path: `/api/qr_guest_access/qr/${img.tokenId}`, expires: 60,
+        });
+        href = signed.path;
+      } catch (_e) { /* si usa il data: URL */ }
+    }
     const link = document.createElement("a");
-    link.href = `data:image/png;base64,${b64}`;
-    link.download = filename || "qr.png";
+    link.href = href;
+    link.download = img.filename || "qr.png";
     document.body.appendChild(link);
     link.click();
     link.remove();
@@ -1034,7 +1075,7 @@ class QRGuestAccessPanel extends HTMLElement {
       } else if (action === "qr") {
         const res = await this._hass.callWS({ type: "qr_guest_access/qr", token_id: id });
         const token = this._data.tokens.find((t) => t.id === id);
-        this._openModal(token ? token.name : "QR", res);
+        this._openModal(token ? token.name : "QR", res, id);
       } else if (action === "restore") {
         await this._hass.callWS({ type: "qr_guest_access/restore", token_id: id });
         await this._refresh();
@@ -1048,8 +1089,9 @@ class QRGuestAccessPanel extends HTMLElement {
     }
   }
 
-  _openModal(title, res) {
-    this._modalImage = { filename: res.filename, b64: res.png_base64 };
+  _openModal(title, res, tokenId) {
+    this._modalImage = { filename: res.filename, b64: res.png_base64, tokenId };
+    this._q("#modalShare").hidden = !this._canShare();
     this._q("#modalTitle").textContent = title;
     this._q("#modalBody").innerHTML = `<img alt="QR di ${esc(title)}" src="data:image/png;base64,${res.png_base64}">`;
     this._q("#modal").hidden = false;

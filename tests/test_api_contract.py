@@ -47,6 +47,12 @@ class ApiContract(unittest.TestCase):
         self.assertIn('type: "qr_guest_access/qr", token_id: id', PANEL)
         self.assertIn("type: `qr_guest_access/${action}`, token_id: id", PANEL)
 
+    def test_png_download_uses_a_signed_admin_only_view(self):
+        self.assertIn('url = "/api/qr_guest_access/qr/{token_id}"', API)
+        self.assertIn("user.is_admin", API)
+        self.assertIn("register_view(QRImageView(hass))", API)
+        self.assertIn('type: "auth/sign_path", path: `/api/qr_guest_access/qr/${img.tokenId}`', PANEL)
+
     def test_all_registered_commands_are_in_the_register_list(self):
         listed = set(re.findall(r"^\s+(ws_[a-z_]+),$", API, flags=re.M))
         defined = set(re.findall(r"^(?:async )?def (ws_[a-z_]+)\(", API, flags=re.M))

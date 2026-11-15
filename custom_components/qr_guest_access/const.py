@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 DOMAIN = "qr_guest_access"
-VERSION = "1.1.0"
+VERSION = "1.1.1"
 
 PLATFORMS = ["sensor"]
 

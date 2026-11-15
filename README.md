@@ -88,7 +88,7 @@ Nelle impostazioni del relè della Shelly (web UI della Shelly, sezione *Timer* 
 All'installazione la **modalità test è attiva**: i QR validi vengono riconosciuti ma la porta non si apre e gli accessi non si scalano.
 
 1. Apri **Accessi ospiti** e crea un QR (es. nome "Prova", scorciatoia *Monouso · 24 ore*, **Genera QR**).
-2. **Scarica PNG** (o tieni premuto sull'immagine dal telefono) e mostralo alla telecamera, oppure aprilo sullo schermo del telefono.
+2. **Scarica PNG** (dal telefono anche **Condividi**) e mostralo alla telecamera, oppure aprilo sullo schermo del telefono.
 3. Nello **Storico** compare la riga "Accesso consentito" con l'etichetta *test*.
 4. Senza telecamera: *Prova una scansione → Simula scansione*.
 5. Prova anche un QR qualsiasi (es. un link): deve comparire "QR sconosciuto".
