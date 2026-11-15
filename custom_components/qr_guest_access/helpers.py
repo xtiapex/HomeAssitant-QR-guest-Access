@@ -28,3 +28,30 @@ def to_utc(value: Any) -> datetime | None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=dt_util.get_default_time_zone())
     return dt_util.as_utc(parsed)
+
+
+_RESULT_TEXT = {
+    "denied_unknown": "QR sconosciuto",
+    "denied_revoked": "QR revocato",
+    "denied_expired": "QR scaduto",
+    "denied_not_started": "QR non ancora valido",
+    "denied_exhausted": "QR con accessi esauriti",
+    "denied_no_door": "QR senza porte abilitate",
+}
+
+
+def notification_text(entry: dict[str, Any]) -> tuple[str, str]:
+    """(titolo, messaggio) della notifica per una voce dello storico."""
+    name = entry.get("name") or "Sconosciuto"
+    doors = ", ".join(entry.get("doors") or [])
+    result = entry["result"]
+    if result == "granted":
+        failed = ", ".join(entry.get("doors_failed") or [])
+        text = f"{name} ha aperto: {doors}" if doors else f"{name} è entrato"
+        if failed:
+            text += f" (non si è aperta: {failed})"
+        return "Accesso consentito", text
+    if result == "error":
+        return "Porta non aperta", f"{name}: il relè non ha risposto ({', '.join(entry.get('doors_failed') or [])})"
+    reason = _RESULT_TEXT.get(result, "Accesso negato")
+    return "Accesso negato", f"{reason}" + (f": {name}" if entry.get("name") else "")

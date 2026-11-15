@@ -42,6 +42,7 @@ def _last_access_attrs(manager: Manager) -> dict[str, Any]:
         "name": last["name"],
         "result": last["result"],
         "door_opened": last["door_opened"],
+        "doors": last.get("doors", []),
         "test": last["test"],
         "source": last["source"],
     }

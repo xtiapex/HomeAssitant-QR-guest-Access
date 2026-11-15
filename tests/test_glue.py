@@ -38,6 +38,10 @@ class FakeServices:
     def __init__(self) -> None:
         self.calls: list[tuple] = []
         self.fail_on: set[str] = set()
+        self.known: set[tuple[str, str]] = {("notify", "mobile_app_a"), ("notify", "mobile_app_b")}
+
+    def has_service(self, domain, service):
+        return (domain, service) in self.known
 
     async def async_call(self, domain, service, data=None, blocking=False):
         if service in self.fail_on:
@@ -72,9 +76,9 @@ class FakeHass:
         return func(*args)
 
     async def settle(self):
-        if self.tasks:
-            await asyncio.gather(*self.tasks)
-            self.tasks.clear()
+        while self.tasks:
+            batch, self.tasks = self.tasks, []
+            await asyncio.gather(*batch)
 
 
 HASS: FakeHass | None = None  # impostato in ogni test; usato dagli stub
@@ -214,7 +218,7 @@ class GlueTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.hass.listeners[0][0], ["image_processing.qr_porta"])
         await self.reader("unknown", self.secret)
         self.assertEqual(
-            self.hass.services.calls,
+            [c for c in self.hass.services.calls if c[0] == "homeassistant"],
             [("homeassistant", "turn_on", {"entity_id": "switch.shelly1_porta"})],
         )
         self.assertEqual(len(self.hass.later), 1)
@@ -308,23 +312,152 @@ class GlueTest(unittest.IsolatedAsyncioTestCase):
     async def test_storage_key_is_the_new_one(self):
         self.assertEqual(Store.instances[0].key, "qr_guest_access_v2")
 
-    async def test_options_override_entry_data(self):
+    async def test_first_run_seeds_door_and_reader_from_config_entry(self):
+        state = self.manager.get_state()
+        self.assertEqual(len(state["doors"]), 1)
+        self.assertEqual(state["doors"][0]["name"], "Porta")
+        self.assertEqual(state["doors"][0]["door_entity"], "switch.shelly1_porta")
+        self.assertEqual(state["doors"][0]["open_seconds"], 3)
+        self.assertEqual(state["reader"]["reader_entity"], "image_processing.qr_porta")
+        self.assertEqual(state["reader"]["camera_entity"], "camera.porta")
+
+    async def test_old_options_still_seed_a_fresh_install(self):
         entry = FakeEntry()
         entry.options = {"open_seconds": 8, "door_entity": "switch.altra"}
+        Store.loaded = None
         manager = await manager_mod.Manager.async_create(self.hass, entry)
-        self.assertEqual(manager.engine.open_seconds, 8)
-        self.assertEqual(manager.door_entity, "switch.altra")
+        self.assertEqual(manager.engine.doors[0]["open_seconds"], 8)
+        self.assertEqual(manager.engine.doors[0]["door_entity"], "switch.altra")
+
+    async def test_seed_never_overrides_saved_settings(self):
+        self.engine.update_door(self.engine.doors[0]["id"], "Cancello", "switch.nuovo", 5)
+        self.engine.set_reader("image_processing.altro", None)
+        Store.loaded = Store.instances[0].delayed()
+        restarted = await manager_mod.Manager.async_create(self.hass, FakeEntry())
+        self.assertEqual(restarted.engine.doors[0]["door_entity"], "switch.nuovo")
+        self.assertEqual(restarted.engine.reader_entity, "image_processing.altro")
+        self.assertEqual(len(restarted.engine.doors), 1)
 
     async def test_camera_is_optional(self):
         entry = FakeEntry(camera_entity=None)
+        Store.loaded = None
         manager = await manager_mod.Manager.async_create(self.hass, entry)
-        self.assertIsNone(manager.get_state()["entities"]["camera"])
+        self.assertIsNone(manager.get_state()["reader"]["camera_entity"])
+
+    # -- più porte ----------------------------------------------------------------
+    async def test_one_scan_opens_both_doors_with_their_own_timers(self):
+        self.engine.add_door("Garage", "switch.garage", 6)
+        await self.reader("unknown", self.secret)
+        on = sorted(c[2]["entity_id"] for c in self.hass.services.calls if c[1] == "turn_on")
+        self.assertEqual(on, ["switch.garage", "switch.shelly1_porta"])
+        self.assertEqual(sorted(d for d, _ in self.hass.later), [3, 6])
+        self.assertEqual(self.engine.get_state()["tokens"][0]["uses_count"], 1)  # un solo accesso
+
+    async def test_changing_a_doors_relay_is_used_immediately(self):
+        self.engine.update_door(self.engine.doors[0]["id"], "Porta", "switch.altro", 2)
+        await self.reader("unknown", self.secret)
+        self.assertEqual(self.hass.services.calls[0][2]["entity_id"], "switch.altro")
+
+    async def test_one_relay_failing_still_opens_the_other(self):
+        self.engine.add_door("Garage", "switch.garage", 6)
+        real = self.hass.services.async_call
+
+        async def flaky(domain, service, data=None, blocking=False):
+            if (data or {}).get("entity_id") == "switch.garage":
+                raise RuntimeError("garage offline")
+            await real(domain, service, data, blocking)
+
+        self.hass.services.async_call = flaky
+        await self.reader("unknown", self.secret)
+        log = self.engine.get_state()["logs"][0]
+        self.assertEqual(log["result"], "granted")
+        self.assertEqual(log["doors"], ["Porta"])
+        self.assertEqual(log["doors_failed"], ["Garage"])
+
+    async def test_shutdown_closes_every_open_door(self):
+        self.engine.add_door("Garage", "switch.garage", 6)
+        await self.reader("unknown", self.secret)
+        self.hass.services.calls.clear()
+        await self.manager.async_shutdown()
+        off = sorted(c[2]["entity_id"] for c in self.hass.services.calls if c[1] == "turn_off")
+        self.assertEqual(off, ["switch.garage", "switch.shelly1_porta"])
+
+    # -- lettore cambiato dalle impostazioni -----------------------------------------
+    async def test_changing_reader_rewires_the_listener(self):
+        self.engine.set_reader("image_processing.altro", None)
+        self.assertEqual([e for e, _ in self.hass.listeners], [["image_processing.altro"]])
+        await self.reader("unknown", self.secret)
+        self.assertEqual(self.engine.get_state()["logs"][0]["result"], "granted")
+
+    # -- notifiche ---------------------------------------------------------------------
+    def notified(self):
+        return [c for c in self.hass.services.calls if c[0] == "notify"]
+
+    async def test_no_notification_without_devices(self):
+        await self.reader("unknown", self.secret)
+        self.assertEqual(self.notified(), [])
+
+    async def test_granted_notification_names_who_and_which_door(self):
+        self.engine.set_notify(["notify.mobile_app_a", "notify.mobile_app_b"], True, False)
+        await self.reader("unknown", self.secret)
+        calls = self.notified()
+        self.assertEqual([c[1] for c in calls], ["mobile_app_a", "mobile_app_b"])
+        self.assertIn("Mario", calls[0][2]["message"])
+        self.assertIn("Porta", calls[0][2]["message"])
+        self.assertNotIn(self.secret, repr(calls))
+
+    async def test_denied_notification_only_if_enabled(self):
+        self.engine.set_notify(["notify.mobile_app_a"], True, False)
+        await self.reader("unknown", "https://example.com")
+        self.assertEqual(self.notified(), [])
+        self.engine.set_notify(["notify.mobile_app_a"], True, True)
+        await self.reader("unknown", "https://example.org")
+        self.assertEqual(len(self.notified()), 1)
+
+    async def test_granted_notification_can_be_switched_off(self):
+        self.engine.set_notify(["notify.mobile_app_a"], False, False)
+        await self.reader("unknown", self.secret)
+        self.assertEqual(self.notified(), [])
+
+    async def test_test_mode_never_notifies(self):
+        self.engine.set_notify(["notify.mobile_app_a"], True, True)
+        self.engine.set_test_mode(True)
+        await self.reader("unknown", self.secret)
+        self.assertEqual(self.notified(), [])
+
+    async def test_door_failure_is_always_notified(self):
+        self.engine.set_notify(["notify.mobile_app_a"], False, False)
+        self.hass.services.fail_on = {"turn_on"}
+        await self.reader("unknown", self.secret)
+        self.assertEqual(len(self.notified()), 1)
+
+    async def test_broken_phone_does_not_stop_the_others(self):
+        self.engine.set_notify(["notify.mobile_app_a", "notify.mobile_app_b"], True, False)
+        real = self.hass.services.async_call
+
+        async def flaky(domain, service, data=None, blocking=False):
+            if service == "mobile_app_a":
+                raise RuntimeError("telefono spento")
+            await real(domain, service, data, blocking)
+
+        self.hass.services.async_call = flaky
+        await self.reader("unknown", self.secret)
+        self.assertEqual([c[1] for c in self.notified()], ["mobile_app_b"])
+        self.assertEqual(self.engine.get_state()["logs"][0]["result"], "granted")
+
+    async def test_test_notification(self):
+        with self.assertRaises(ValueError):
+            await self.manager.async_test_notify()
+        self.engine.set_notify(["notify.mobile_app_a", "notify.sparito"], True, False)
+        failed = await self.manager.async_test_notify()
+        self.assertEqual(failed, ["notify.sparito"])  # servizio inesistente segnalato
+        self.assertEqual([c[1] for c in self.notified()], ["mobile_app_a"])
 
     # -- pannello --------------------------------------------------------------------
     async def test_state_for_panel_never_contains_the_secret(self):
         state = self.manager.get_state()
         self.assertNotIn(self.secret, repr(state))
-        self.assertEqual(state["entities"]["door"], "switch.shelly1_porta")
+        self.assertEqual(state["doors"][0]["door_entity"], "switch.shelly1_porta")
 
     async def test_qr_png(self):
         try:

@@ -38,13 +38,14 @@ class FakeClock:
 
 class FakeDoor:
     def __init__(self) -> None:
-        self.calls: list[float] = []
+        self.calls: list[tuple[str, float]] = []
         self.fail = False
+        self.fail_ids: set[str] = set()
 
-    async def open(self, seconds: float) -> None:
-        if self.fail:
+    async def open(self, door_id: str, seconds: float) -> None:
+        if self.fail or door_id in self.fail_ids:
             raise RuntimeError("relè irraggiungibile")
-        self.calls.append(seconds)
+        self.calls.append((door_id, seconds))
 
 
 class Base(unittest.IsolatedAsyncioTestCase):
@@ -54,15 +55,17 @@ class Base(unittest.IsolatedAsyncioTestCase):
         self.saved: list[dict] = []
         self.events: list[dict] = []
         self.changes = 0
+        self.reader_changes = 0
         self.eng = self.make_engine({})
         self.eng.set_test_mode(False)
+        self.gate = self.eng.add_door("Cancello", "switch.cancello", 3)
 
     def make_engine(self, data) -> "engine.AccessEngine":
         return engine.AccessEngine(
             data,
             self.door,
             self.clock,
-            open_seconds=3,
+            on_reader_changed=self._count_reader,
             persist=lambda func: self.saved.append(func()),
             on_event=self.events.append,
             on_change=self._count_change,
@@ -70,6 +73,9 @@ class Base(unittest.IsolatedAsyncioTestCase):
 
     def _count_change(self) -> None:
         self.changes += 1
+
+    def _count_reader(self) -> None:
+        self.reader_changes += 1
 
     def token(self, **kw):
         params = dict(name="Mario", valid_from=None, valid_until=None, max_uses=1)
@@ -133,7 +139,7 @@ class TestScanRules(Base):
         self.assertTrue(first.door_opened)
         second = await self.scan(code)
         self.assertEqual(second.result, engine.RESULT_EXHAUSTED)
-        self.assertEqual(self.door.calls, [3])
+        self.assertEqual(self.door.calls, [(self.gate['id'], 3)])
 
     async def test_multi_use(self):
         _, code = self.token(max_uses=3)
@@ -372,13 +378,14 @@ class TestDoorAndModes(Base):
         import asyncio
 
         class SlowDoor(FakeDoor):
-            async def open(self, seconds):
+            async def open(self, door_id, seconds):
                 await asyncio.sleep(0.01)
-                await super().open(seconds)
+                await super().open(door_id, seconds)
 
         self.door = SlowDoor()
         self.eng = self.make_engine({})
         self.eng.set_test_mode(False)
+        self.eng.add_door("Cancello", "switch.cancello", 3)
         _, code = self.token(max_uses=1)
         results = await asyncio.gather(*(self.scan(code) for _ in range(5)))
         granted = [r for r in results if r.result == engine.RESULT_GRANTED]
@@ -466,6 +473,176 @@ class TestLogsStatsPersistence(Base):
         self.eng.revoke_token(revoked["id"])
         names = [t["name"] for t in self.eng.get_state()["tokens"]]
         self.assertEqual(names, ["nuovo", "vecchio", "revocato"])
+
+
+class TestDoors(Base):
+    def setUp(self) -> None:
+        super().setUp()
+        self.garage = self.eng.add_door("Garage", "switch.garage", 5)
+
+    async def test_one_scan_opens_all_doors_and_costs_one_access(self):
+        public, code = self.token(max_uses=2)
+        result = await self.scan(code)
+        self.assertEqual(result.result, engine.RESULT_GRANTED)
+        self.assertEqual(sorted(result.doors), ["Cancello", "Garage"])
+        self.assertEqual(
+            sorted(self.door.calls),
+            sorted([(self.gate["id"], 3), (self.garage["id"], 5)]),
+        )
+        state = {t["id"]: t for t in self.eng.get_state()["tokens"]}[public["id"]]
+        self.assertEqual((state["uses_left"], state["uses_count"]), (1, 1))
+
+    async def test_token_limited_to_one_door(self):
+        _, code = self.token(doors=[self.garage["id"]])
+        result = await self.scan(code)
+        self.assertEqual(result.doors, ["Garage"])
+        self.assertEqual(self.door.calls, [(self.garage["id"], 5)])
+
+    def test_selecting_all_doors_means_all(self):
+        public, _ = self.token(doors=[self.gate["id"], self.garage["id"]])
+        self.assertIsNone(public["doors"])
+
+    def test_all_doors_token_follows_new_doors(self):
+        public, code = self.token()
+        third = self.eng.add_door("Pedonale", "switch.pedonale", 2)
+        self.assertEqual(len(self.eng._authorized_doors(self.eng._data["tokens"][public["id"]])), 3)
+        self.assertIsNotNone(third["id"])
+
+    def test_invalid_door_selection(self):
+        for bad in ([], ["nope"], "x", [1]):
+            with self.subTest(bad=bad):
+                with self.assertRaises(ValueError):
+                    self.token(doors=bad)
+
+    async def test_update_token_doors(self):
+        public, code = self.token()
+        updated = self.eng.update_token(public["id"], doors=[self.gate["id"]])
+        self.assertEqual(updated["doors"], [self.gate["id"]])
+        self.assertEqual((await self.scan(code)).doors, ["Cancello"])
+        self.assertIsNone(self.eng.update_token(public["id"], doors=None)["doors"])
+        # non indicato = invariato
+        self.eng.update_token(public["id"], doors=[self.garage["id"]])
+        self.assertEqual(self.eng.update_token(public["id"], uses_left=3)["doors"], [self.garage["id"]])
+
+    async def test_partial_failure_still_grants(self):
+        _, code = self.token(max_uses=2)
+        self.door.fail_ids = {self.garage["id"]}
+        result = await self.scan(code)
+        self.assertEqual(result.result, engine.RESULT_GRANTED)
+        self.assertEqual(result.doors, ["Cancello"])
+        entry = self.eng.get_state()["logs"][0]
+        self.assertEqual(entry["doors_failed"], ["Garage"])
+        self.assertEqual(self.eng.get_state()["tokens"][0]["uses_left"], 1)
+
+    async def test_total_failure_refunds(self):
+        public, code = self.token(max_uses=2)
+        self.door.fail = True
+        result = await self.scan(code)
+        self.assertEqual(result.result, engine.RESULT_ERROR)
+        self.assertEqual(self.eng.get_state()["tokens"][0]["uses_left"], 2)
+
+    async def test_test_mode_lists_doors_without_opening(self):
+        _, code = self.token()
+        self.eng.set_test_mode(True)
+        result = await self.scan(code)
+        self.assertEqual(sorted(result.doors), ["Cancello", "Garage"])
+        self.assertFalse(result.door_opened)
+        self.assertEqual(self.door.calls, [])
+
+    async def test_deleting_door_updates_tokens(self):
+        public, code = self.token(doors=[self.garage["id"]])
+        self.eng.delete_door(self.garage["id"])
+        self.assertEqual((await self.scan(code)).result, engine.RESULT_NO_DOOR)
+        self.assertEqual(self.door.calls, [])
+
+    def test_cannot_delete_last_door(self):
+        self.eng.delete_door(self.garage["id"])
+        with self.assertRaises(ValueError):
+            self.eng.delete_door(self.gate["id"])
+        with self.assertRaises(ValueError):
+            self.eng.delete_door("nope")
+
+    def test_door_validation(self):
+        bad = [
+            ("", "switch.x", 3), ("x" * 41, "switch.x", 3), ("A", "sensor.x", 3),
+            ("A", "nodomain", 3), ("A", "switch.x", 0), ("A", "switch.x", 31),
+            ("A", "switch.x", True), ("A", "switch.x", 2.5), (None, "switch.x", 3),
+        ]
+        for name, entity, secs in bad:
+            with self.subTest(name=name, entity=entity, secs=secs):
+                with self.assertRaises(ValueError):
+                    self.eng.add_door(name, entity, secs)
+
+    def test_update_door(self):
+        updated = self.eng.update_door(self.gate["id"], "Cancello grande", "light.c", 4)
+        self.assertEqual((updated["name"], updated["door_entity"], updated["open_seconds"]), ("Cancello grande", "light.c", 4))
+        self.assertEqual(self.eng.door_entity(self.gate["id"]), "light.c")
+        with self.assertRaises(ValueError):
+            self.eng.update_door("nope", "A", "switch.x", 3)
+
+
+class TestSettings(Base):
+    def test_reader(self):
+        self.eng.set_reader("image_processing.qr", "camera.porta")
+        self.assertEqual(self.eng.reader_entity, "image_processing.qr")
+        self.assertEqual(self.reader_changes, 1)
+        self.eng.set_reader("image_processing.qr", None)  # stesso lettore: nessun ricarico
+        self.assertEqual(self.reader_changes, 1)
+        self.assertIsNone(self.eng.camera_entity)
+        self.eng.set_reader("image_processing.altro", None)
+        self.assertEqual(self.reader_changes, 2)
+        for reader, cam in (("sensor.x", None), ("image_processing.qr", "sensor.c"), ("qr", None)):
+            with self.subTest(reader=reader, cam=cam):
+                with self.assertRaises(ValueError):
+                    self.eng.set_reader(reader, cam)
+        self.assertEqual(self.eng.get_state()["reader"]["reader_entity"], "image_processing.altro")
+
+    def test_notify_defaults_and_set(self):
+        self.assertEqual(self.eng.notify_settings(), {"services": [], "on_granted": True, "on_denied": False})
+        out = self.eng.set_notify(["notify.mobile_app_a", "notify.mobile_app_a", "notify.mobile_app_b"], True, True)
+        self.assertEqual(out["services"], ["notify.mobile_app_a", "notify.mobile_app_b"])
+        self.assertTrue(out["on_denied"])
+        self.assertEqual(self.eng.get_state()["settings"]["notify"], out)
+
+    def test_notify_validation(self):
+        for bad in (["light.x"], ["notify"], [5], "notify.a", ["notify.a"] * 0 + ["notify.x"] * 21 and [f"notify.s{i}" for i in range(21)]):
+            with self.subTest(bad=bad):
+                with self.assertRaises(ValueError):
+                    self.eng.set_notify(bad, True, False)
+
+    def test_settings_survive_json_roundtrip(self):
+        self.eng.set_reader("image_processing.qr", "camera.p")
+        self.eng.set_notify(["notify.mobile_app_a"], False, True)
+        reloaded = self.make_engine(json.loads(json.dumps(self.saved[-1])))
+        self.assertEqual(reloaded.reader_entity, "image_processing.qr")
+        self.assertEqual(reloaded.notify_settings()["services"], ["notify.mobile_app_a"])
+        self.assertEqual(len(reloaded.doors), 1)
+
+
+class TestSearchLogs(Base):
+    async def test_search(self):
+        _, mario = self.token(name="Mario Rossi")
+        _, tecnico = self.token(name="Tecnico caldaia")
+        await self.scan(mario)
+        await self.scan(tecnico)
+        await self.scan("QG-sconosciuto-xyz")
+        names = lambda q: [e["name"] for e in self.eng.search_logs(q)]
+        self.assertEqual(names("mario"), ["Mario Rossi"])
+        self.assertEqual(names("  CALDAIA "), ["Tecnico caldaia"])
+        self.assertEqual(len(self.eng.search_logs("")), 3)
+        self.assertEqual(len(self.eng.search_logs(None)), 3)
+        self.assertEqual(len(self.eng.search_logs("cancello")), 2)  # anche per nome porta
+        self.assertEqual(len(self.eng.search_logs("sconosc")), 1)  # anteprima codice sconosciuto
+        self.assertEqual(self.eng.search_logs("zzz"), [])
+        self.assertEqual(len(self.eng.search_logs("", limit=2)), 2)
+
+    async def test_search_reaches_beyond_the_100_shown(self):
+        _, code = self.token(name="Vecchio")
+        await self.scan(code)
+        for i in range(150):
+            await self.scan(f"garbage-{i}")
+        self.assertNotIn("Vecchio", [e["name"] for e in self.eng.get_state()["logs"]])
+        self.assertEqual(len(self.eng.search_logs("vecchio")), 1)
 
 
 class TestTimezoneSafety(Base):

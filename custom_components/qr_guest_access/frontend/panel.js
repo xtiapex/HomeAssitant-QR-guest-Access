@@ -17,6 +17,7 @@ const RESULT = {
   denied_expired: { label: "QR scaduto", cls: "bad" },
   denied_not_started: { label: "Non ancora valido", cls: "warn" },
   denied_exhausted: { label: "Accessi esauriti", cls: "bad" },
+  denied_no_door: { label: "Nessuna porta abilitata", cls: "warn" },
   error: { label: "Errore porta", cls: "warn" },
 };
 
@@ -44,6 +45,7 @@ const TEMPLATE = `
   :host { display: block; min-height: 100%; background: var(--primary-background-color);
           color: var(--primary-text-color); font-family: var(--paper-font-body1_-_font-family, Roboto, sans-serif); }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   .page { max-width: 1180px; margin: 0 auto; padding: 0 16px 48px; }
   header { display: flex; align-items: center; gap: 12px; height: 56px; padding: 0 4px; }
   header h1 { font-size: 20px; font-weight: 500; margin: 0; flex: 1; }
@@ -105,7 +107,13 @@ const TEMPLATE = `
   .row .meta { font-size: 13px; color: var(--secondary-text-color); margin-top: 2px; line-height: 1.4; }
   .row .actions { display: flex; gap: 6px; flex-wrap: wrap; }
   .row .time { flex: 0 0 130px; font-size: 13px; color: var(--secondary-text-color); }
-  .row .door { flex: 0 0 90px; font-size: 13px; color: var(--secondary-text-color); }
+  .row .door { flex: 0 0 170px; font-size: 13px; color: var(--secondary-text-color); line-height: 1.35; }
+  .row .door .fail { color: var(--warning-color, #ffa600); }
+  .checks { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 6px; }
+  .checks .inline { margin-top: 0; }
+  .search { width: 100%; margin-bottom: 4px; }
+  .count { font-size: 12px; color: var(--secondary-text-color); margin: 4px 0 6px; }
+  .modal.edit .box select, .modal.edit .box input[type=text] { margin-bottom: 0; }
   .chip { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 500;
           vertical-align: middle; margin-left: 6px; border: 1px solid currentColor; white-space: nowrap; }
   .chip.ok { color: var(--success-color, #43a047); }
@@ -122,7 +130,7 @@ const TEMPLATE = `
   .modal .box { background: var(--card-background-color); border-radius: 14px; padding: 20px; text-align: center;
                 max-width: 340px; width: 100%; }
   .modal h3 { margin: 0 0 12px; font-size: 16px; font-weight: 500; overflow-wrap: anywhere; }
-  .modal.edit .box { max-width: 420px; text-align: left; }
+  .modal.edit .box { max-width: 420px; text-align: left; max-height: 92vh; overflow-y: auto; }
   .modal.edit h3 { margin-bottom: 4px; }
   .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 30; max-width: min(92vw, 520px);
            background: var(--error-color, #db4437); color: #fff; padding: 12px 18px; border-radius: 10px; font-size: 14px;
@@ -138,11 +146,45 @@ const TEMPLATE = `
 <div class="page">
   <header>
     <ha-menu-button></ha-menu-button>
-    <h1>Accessi ospiti</h1>
-    <label class="toggle"><input type="checkbox" id="testToggle"><span>Modalità test</span></label>
+    <h1 id="title">Accessi ospiti</h1>
+    <label class="toggle" id="testWrap"><input type="checkbox" id="testToggle"><span>Modalità test</span></label>
+    <button id="settingsBtn">⚙ Impostazioni</button>
+    <button id="backBtn" hidden>← Indietro</button>
   </header>
 
   <div id="banner"></div>
+
+  <div id="settingsView" hidden>
+    <section class="card">
+      <h2>Porte <span class="spacer"></span><button class="small" id="doorAddBtn">+ Aggiungi porta</button></h2>
+      <div class="hint" style="margin:0 0 6px">Un solo lettore QR apre tutte le porte autorizzate dal QR (ognuna col suo relè): un passaggio conta come un solo accesso.</div>
+      <div id="doorList"></div>
+    </section>
+    <section class="card">
+      <h2>Lettore e telecamera</h2>
+      <label class="f" for="setReader">Lettore QR (image_processing)</label>
+      <select id="setReader"></select>
+      <label class="f" for="setCamera">Telecamera per l'anteprima (facoltativa)</label>
+      <select id="setCamera"></select>
+      <div style="margin-top:14px"><button class="primary" id="readerSave">Salva</button></div>
+      <div class="msg" id="readerMsg"></div>
+    </section>
+    <section class="card">
+      <h2>Notifiche sul telefono</h2>
+      <div class="hint" style="margin:0 0 6px">Scegli i telefoni (app Home Assistant) che ricevono un avviso con il nome di chi ha aperto e la porta.</div>
+      <div class="checks" id="notifyDevices"></div>
+      <label class="inline"><input type="checkbox" id="notifyGranted"> Avvisa quando qualcuno entra</label>
+      <label class="inline"><input type="checkbox" id="notifyDenied"> Avvisa anche per i tentativi negati (QR scaduto, sconosciuto…)</label>
+      <div class="hint">Se una porta non risponde ricevi sempre un avviso. In modalità test non parte nessuna notifica.</div>
+      <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
+        <button class="primary" id="notifySave">Salva</button>
+        <button id="notifyTest">Invia notifica di prova</button>
+      </div>
+      <div class="msg" id="notifyMsg"></div>
+    </section>
+  </div>
+
+  <div id="mainView">
   <section class="stats" id="stats"></section>
 
   <div class="grid">
@@ -167,6 +209,12 @@ const TEMPLATE = `
       <label class="f" for="uses">Numero di accessi</label>
       <input type="number" id="uses" min="1" max="999" value="1">
       <label class="inline"><input type="checkbox" id="unlimited"> Accessi illimitati (richiede una data di fine)</label>
+
+      <div id="createDoors" hidden>
+        <label class="f">Porte che apre</label>
+        <div class="checks" id="createDoorChecks"></div>
+        <div class="hint">Un passaggio apre tutte le porte spuntate e consuma un solo accesso.</div>
+      </div>
 
       <div style="margin-top:16px"><button class="primary" id="createBtn">Genera QR</button></div>
       <div class="msg" id="createMsg"></div>
@@ -198,8 +246,11 @@ const TEMPLATE = `
 
   <section class="card">
     <h2>Storico <span class="spacer"></span><button class="small danger" id="clearLogs">Cancella</button></h2>
+    <input type="text" class="search" id="logSearch" placeholder="Cerca per nome, porta o codice…" autocomplete="off">
+    <div class="count" id="logCount"></div>
     <div id="logs"></div>
   </section>
+  </div>
 </div>
 
 <div class="toast" id="toast" role="alert" hidden></div>
@@ -215,9 +266,28 @@ const TEMPLATE = `
     <label class="f" for="editUses">Accessi disponibili da adesso</label>
     <input type="number" id="editUses" min="1" max="999" value="1">
     <label class="inline"><input type="checkbox" id="editUnlimited"> Accessi illimitati (richiede una data di fine)</label>
+    <div id="editDoors" hidden>
+      <label class="f">Porte che apre</label>
+      <div class="checks" id="editDoorChecks"></div>
+    </div>
     <div class="hint">Gli accessi già usati restano nello storico. Un QR scaduto o esaurito torna attivo se le nuove date e i nuovi accessi lo permettono.</div>
     <div class="msg" id="editMsg"></div>
     <div class="actions" style="justify-content:flex-end"><button id="editCancel">Annulla</button><button class="primary" id="editSave">Salva</button></div>
+  </div>
+</div>
+
+<div class="modal edit" id="doorModal" hidden>
+  <div class="box">
+    <h3 id="doorModalTitle">Porta</h3>
+    <label class="f" for="doorName">Nome (es. Cancello, Garage)</label>
+    <input type="text" id="doorName" maxlength="40" autocomplete="off">
+    <label class="f" for="doorEntity">Relè (interruttore della Shelly)</label>
+    <select id="doorEntity"></select>
+    <label class="f" for="doorSeconds">Secondi di apertura</label>
+    <input type="number" id="doorSeconds" min="1" max="30" value="3">
+    <div class="hint">Per quanto tempo il relè resta acceso dopo un QR valido. Consiglio: imposta lo stesso tempo anche come auto-spegnimento sulla Shelly.</div>
+    <div class="msg" id="doorMsg"></div>
+    <div class="actions" style="justify-content:flex-end"><button id="doorCancel">Annulla</button><button class="primary" id="doorSave">Salva</button></div>
   </div>
 </div>
 
@@ -247,6 +317,13 @@ class QRGuestAccessPanel extends HTMLElement {
     this._confirmKey = null;
     this._confirmTimer = null;
     this._modalImage = null;
+    this._view = "main";
+    this._logQuery = "";
+    this._searchRes = null;
+    this._searchSeq = 0;
+    this._searchDebounce = null;
+    this._doorEditId = null;
+    this._createDoorsSig = null;
   }
 
   // ---- proprietà impostate da Home Assistant -------------------------------
@@ -296,6 +373,7 @@ class QRGuestAccessPanel extends HTMLElement {
     this._timers.forEach(clearInterval);
     this._timers = [];
     clearTimeout(this._refreshDebounce);
+    clearTimeout(this._searchDebounce);
     if (this._unsubEvents) {
       this._unsubEvents();
       this._unsubEvents = null;
@@ -321,6 +399,23 @@ class QRGuestAccessPanel extends HTMLElement {
     this._q("#unlimited").addEventListener("change", () => this._syncUnlimited());
     this._q("#testToggle").addEventListener("change", (e) => this._toggleTest(e.target));
     this._q("#simBtn").addEventListener("click", () => this._simulate());
+    this._q("#settingsBtn").addEventListener("click", () => this._showView("settings"));
+    this._q("#backBtn").addEventListener("click", () => this._showView("main"));
+    this._q("#doorAddBtn").addEventListener("click", () => this._openDoor(null));
+    this._q("#doorCancel").addEventListener("click", () => this._closeDoor());
+    this._q("#doorSave").addEventListener("click", () => this._saveDoor());
+    this._q("#doorModal").addEventListener("click", (e) => { if (e.target.id === "doorModal") this._closeDoor(); });
+    this._q("#readerSave").addEventListener("click", () => this._saveReader());
+    this._q("#notifySave").addEventListener("click", () => this._saveNotify());
+    this._q("#notifyTest").addEventListener("click", () => this._testNotify());
+    this._q("#doorList").addEventListener("click", (e) => {
+      const btn = e.target.closest("button[data-door]");
+      if (btn) this._doorAction(btn.dataset.door, btn.dataset.id);
+    });
+    this._q("#logSearch").addEventListener("input", () => {
+      clearTimeout(this._searchDebounce);
+      this._searchDebounce = setTimeout(() => this._runLogSearch(), 250);
+    });
     this._q("#clearLogs").addEventListener("click", (e) => this._clearLogs(e.currentTarget));
     this._q("#modalClose").addEventListener("click", () => this._closeModal());
     this._q("#editCancel").addEventListener("click", () => this._closeEdit());
@@ -331,7 +426,7 @@ class QRGuestAccessPanel extends HTMLElement {
     this._q("#modalDownload").addEventListener("click", () => {
       if (this._modalImage) this._download(this._modalImage.filename, this._modalImage.b64);
     });
-    this.shadowRoot.addEventListener("keydown", (e) => { if (e.key === "Escape") { this._closeModal(); this._closeEdit(); } });
+    this.shadowRoot.addEventListener("keydown", (e) => { if (e.key === "Escape") { this._closeModal(); this._closeEdit(); this._closeDoor(); } });
 
     this.shadowRoot.querySelectorAll("[data-preset]").forEach((btn) =>
       btn.addEventListener("click", () => this._applyPreset(btn.dataset.preset)));
@@ -365,6 +460,7 @@ class QRGuestAccessPanel extends HTMLElement {
     } catch (err) {
       this._error = (err && err.message) || String(err);
     }
+    if (this._logQuery) await this._runLogSearch(true);
     this._renderAll();
   }
 
@@ -389,9 +485,12 @@ class QRGuestAccessPanel extends HTMLElement {
     this._renderBanner();
     this._renderStats();
     this._renderCamera();
+    this._renderCreateDoors();
     this._renderTokens();
     this._renderSim();
     this._renderLogs();
+    this._renderDoorList();
+    if (this._view === "settings" && !this._formsReady) this._renderSettingsForms();
     this._renderLive();
   }
 
@@ -411,8 +510,10 @@ class QRGuestAccessPanel extends HTMLElement {
         <b>la porta non si apre</b> e gli accessi <b>non vengono scalati</b>. Disattivala (in alto a destra) quando
         sei pronto a usare il sistema sul serio.</div>`;
     } else {
-      el.innerHTML = `<div class="banner live"><b>Sistema attivo.</b> Un QR valido apre la porta per
-        ${esc(this._data.settings.open_seconds)} secondi e scala un accesso.</div>`;
+      const names = this._data.doors.map((d) => d.name).join(" + ");
+      const nodoor = !this._data.doors.length ? " <b>Nessuna porta configurata: aggiungila dalle Impostazioni.</b>" : "";
+      el.innerHTML = `<div class="banner live"><b>Sistema attivo.</b> Un QR valido apre ${esc(names || "la porta")}
+        e scala un accesso.${nodoor}</div>`;
     }
   }
 
@@ -424,32 +525,39 @@ class QRGuestAccessPanel extends HTMLElement {
       <div class="tile"><div class="v">${esc(s.active)}${pending}</div><div class="l">QR attivi</div></div>
       <div class="tile"><div class="v">${esc(s.granted)}</div><div class="l">Accessi consentiti</div></div>
       <div class="tile"><div class="v">${esc(s.denied)}</div><div class="l">Accessi negati</div></div>
-      <div class="tile"><div class="v" id="doorState">—</div><div class="l">Relè porta</div></div>`;
+      <div class="tile"><div class="v" id="doorState">—</div><div class="l">Relè porte</div></div>`;
   }
 
   _renderLive() {
     if (!this._built || !this._data || !this._hass) return;
-    const ent = this._data.entities || {};
     const door = this._q("#doorState");
     if (door) {
-      const st = this._hass.states[ent.door];
-      door.textContent = !st ? "n/d" : st.state === "on" ? "Acceso" : st.state === "off" ? "Spento" : st.state;
+      const doors = this._data.doors;
+      const states = doors.map((d) => this._hass.states[d.door_entity]);
+      const on = states.filter((st) => st && st.state === "on").length;
+      const missing = states.filter((st) => !st).length;
+      door.textContent = !doors.length ? "—"
+        : on ? (doors.length > 1 ? `${on} accesi` : "Acceso")
+        : missing === doors.length ? "n/d" : "Spenti";
+      if (doors.length === 1) door.textContent = on ? "Acceso" : missing ? "n/d" : "Spento";
     }
     const info = this._q("#readerInfo");
     if (info) {
-      const st = this._hass.states[ent.reader];
-      info.textContent = st ? `Lettore: ${st.state === "unknown" ? "nessun QR visibile" : "QR visibile"}` : "Lettore non trovato";
+      const reader = this._data.reader.reader_entity;
+      const st = reader ? this._hass.states[reader] : null;
+      info.textContent = !reader ? "Lettore non impostato"
+        : st ? `Lettore: ${st.state === "unknown" ? "nessun QR visibile" : "QR visibile"}` : "Lettore non trovato";
     }
   }
 
   _renderCamera() {
     const box = this._q("#camBox");
-    const ent = this._data && this._data.entities && this._data.entities.camera;
+    const ent = this._data && this._data.reader && this._data.reader.camera_entity;
     if (!ent) {
       if (!box.dataset.mode || box.dataset.mode !== "none") {
         box.dataset.mode = "none";
-        box.innerHTML = `<div class="cam-empty">Nessuna telecamera selezionata.<br>Puoi aggiungerla dalle impostazioni
-          dell'integrazione per inquadrare meglio il QR.</div>`;
+        box.innerHTML = `<div class="cam-empty">Nessuna telecamera selezionata.<br>Puoi sceglierla da ⚙ Impostazioni
+          per inquadrare meglio il QR.</div>`;
       }
       return;
     }
@@ -463,7 +571,7 @@ class QRGuestAccessPanel extends HTMLElement {
 
   _refreshCam() {
     if (document.hidden || !this._hass || !this._data) return;
-    const ent = this._data.entities && this._data.entities.camera;
+    const ent = this._data.reader && this._data.reader.camera_entity;
     const img = this._q("#cam");
     if (!ent || !img) return;
     const st = this._hass.states[ent];
@@ -472,6 +580,14 @@ class QRGuestAccessPanel extends HTMLElement {
     const probe = new Image();
     probe.onload = () => { img.src = probe.src; };
     probe.src = `${pic}${pic.includes("?") ? "&" : "?"}_=${Date.now()}`;
+  }
+
+  _doorsText(t) {
+    const doors = (this._data && this._data.doors) || [];
+    if (doors.length < 2) return "";
+    if (t.doors === null) return "Tutte le porte";
+    const names = t.doors.map((id) => (doors.find((d) => d.id === id) || {}).name).filter(Boolean);
+    return names.length ? `Apre: ${names.join(", ")}` : "Nessuna porta abilitata";
   }
 
   _usesText(t) {
@@ -497,7 +613,7 @@ class QRGuestAccessPanel extends HTMLElement {
       return `<div class="row">
         <div class="main">
           <div class="name">${esc(t.name)}<span class="chip ${st.cls}">${esc(st.label)}</span></div>
-          <div class="meta">${esc(this._usesText(t))}<br>${esc(validity)} · ${esc(last)}</div>
+          <div class="meta">${esc(this._usesText(t))}${this._doorsText(t) ? ` · ${esc(this._doorsText(t))}` : ""}<br>${esc(validity)} · ${esc(last)}</div>
         </div>
         <div class="actions">
           ${live ? `<button class="small" data-act="qr" data-id="${esc(t.id)}">Mostra QR</button>` : ""}
@@ -523,16 +639,56 @@ class QRGuestAccessPanel extends HTMLElement {
     if (previous && this._data.tokens.some((t) => t.id === previous)) select.value = previous;
 
     this._q("#simHint").innerHTML = this._data.settings.test_mode
-      ? "Modalità test attiva: la simulazione controlla il QR ma non apre la porta e non scala accessi."
-      : "<b>Attenzione:</b> la modalità test è disattivata, quindi la simulazione apre davvero la porta e scala un accesso.";
+      ? "Modalità test attiva: la simulazione controlla il QR ma non apre le porte e non scala accessi."
+      : "<b>Attenzione:</b> la modalità test è disattivata, quindi la simulazione apre davvero le porte e scala un accesso.";
+  }
+
+  async _runLogSearch(silent) {
+    const query = this._q("#logSearch").value.trim();
+    this._logQuery = query;
+    if (!query) {
+      this._searchRes = null;
+      if (!silent) this._renderLogs();
+      return;
+    }
+    const seq = ++this._searchSeq;
+    try {
+      const res = await this._hass.callWS({ type: "qr_guest_access/logs", query, limit: 200 });
+      if (seq !== this._searchSeq) return;  // è partita una ricerca più recente
+      this._searchRes = res.logs;
+    } catch (err) {
+      if (seq !== this._searchSeq) return;
+      this._searchRes = null;
+      this._toast((err && err.message) || "Ricerca non riuscita.");
+    }
+    if (!silent) this._renderLogs();
+  }
+
+  _doorCell(l) {
+    const doors = (l.doors || []).join(", ");
+    const failed = (l.doors_failed || []).join(", ");
+    let text;
+    if (l.door_opened) text = doors ? `Aperta: ${esc(doors)}` : "Porta aperta";
+    else if (l.test && doors) text = `Test: ${esc(doors)}`;
+    else text = "Porta chiusa";
+    return text + (failed ? `<br><span class="fail">Non si è aperta: ${esc(failed)}</span>` : "");
   }
 
   _renderLogs() {
     const box = this._q("#logs");
     if (!this._data) return;
-    const logs = this._data.logs;
+    const searching = !!this._logQuery;
+    const logs = searching && this._searchRes ? this._searchRes : this._data.logs;
+    const count = this._q("#logCount");
+    if (searching && this._searchRes) {
+      count.textContent = `${logs.length}${logs.length >= 200 ? "+" : ""} ${logs.length === 1 ? "risultato" : "risultati"} per “${this._logQuery}”`;
+    } else if (this._data.logs.length >= 100) {
+      count.textContent = "Mostro le ultime 100 scansioni: usa la ricerca per trovare anche le precedenti (fino a 500).";
+    } else {
+      count.textContent = "";
+    }
     if (!logs.length) {
-      box.innerHTML = `<div class="empty">Nessuna scansione registrata.</div>`;
+      box.innerHTML = `<div class="empty">${searching ? "Nessun risultato." : "Nessuna scansione registrata."}</div>`;
       return;
     }
     box.innerHTML = logs.map((l) => {
@@ -544,9 +700,217 @@ class QRGuestAccessPanel extends HTMLElement {
         <div class="time">${esc(this._fmt(l.ts))}</div>
         <div class="main"><span class="name">${who}</span>${tags}</div>
         <div><span class="chip ${res.cls}" style="margin-left:0">${esc(res.label)}</span></div>
-        <div class="door">${l.door_opened ? "Porta aperta" : "Porta chiusa"}</div>
+        <div class="door">${this._doorCell(l)}</div>
       </div>`;
     }).join("");
+  }
+
+  // ---- porte: scelta per QR ----------------------------------------------------------------
+  _doorChecksHtml(selected) {
+    // selected: null = tutte; altrimenti lista di id
+    return this._data.doors.map((d) => {
+      const on = selected === null || selected.includes(d.id);
+      return `<label class="inline"><input type="checkbox" data-door-id="${esc(d.id)}" ${on ? "checked" : ""}> ${esc(d.name)}</label>`;
+    }).join("");
+  }
+
+  _readDoorChecks(boxSelector) {
+    const boxes = [...this._q(boxSelector).querySelectorAll("input[data-door-id]")];
+    if (boxes.length < 2) return null;
+    const ids = boxes.filter((b) => b.checked).map((b) => b.dataset.doorId);
+    return ids.length === boxes.length ? null : ids;
+  }
+
+  _renderCreateDoors() {
+    if (!this._data) return;
+    const doors = this._data.doors;
+    const sig = doors.map((d) => `${d.id}:${d.name}`).join("|");
+    const wrap = this._q("#createDoors");
+    wrap.hidden = doors.length < 2;
+    if (sig !== this._createDoorsSig) {  // si ridisegna solo se le porte cambiano: le spunte restano
+      this._createDoorsSig = sig;
+      this._q("#createDoorChecks").innerHTML = this._doorChecksHtml(null);
+    }
+  }
+
+  // ---- impostazioni --------------------------------------------------------------------------
+  _showView(view) {
+    this._view = view;
+    const settings = view === "settings";
+    this._q("#mainView").hidden = settings;
+    this._q("#settingsView").hidden = !settings;
+    this._q("#settingsBtn").hidden = settings;
+    this._q("#backBtn").hidden = !settings;
+    this._q("#testWrap").hidden = settings;
+    this._q("#title").textContent = settings ? "Impostazioni" : "Accessi ospiti";
+    if (settings) {
+      this._formsReady = false;
+      if (this._data) this._renderSettingsForms();
+    }
+  }
+
+  _entityOptions(domains, current, emptyLabel) {
+    const states = Object.values((this._hass && this._hass.states) || {})
+      .filter((st) => domains.includes(st.entity_id.split(".")[0]))
+      .map((st) => ({ id: st.entity_id, name: (st.attributes && st.attributes.friendly_name) || st.entity_id }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    if (current && !states.some((x) => x.id === current)) states.unshift({ id: current, name: `${current} (non trovata)` });
+    const opts = states.map((x) =>
+      `<option value="${esc(x.id)}" ${x.id === current ? "selected" : ""}>${esc(x.name)} · ${esc(x.id)}</option>`);
+    if (emptyLabel) opts.unshift(`<option value="" ${current ? "" : "selected"}>${esc(emptyLabel)}</option>`);
+    return opts.join("");
+  }
+
+  _notifyServices() {
+    const svc = (this._hass && this._hass.services && this._hass.services.notify) || {};
+    return Object.keys(svc).filter((n) => n.startsWith("mobile_app_")).sort().map((n) => `notify.${n}`);
+  }
+
+  _renderSettingsForms() {
+    if (!this._data || !this._hass) return;
+    this._formsReady = true;
+    const reader = this._data.reader;
+    this._q("#setReader").innerHTML = this._entityOptions(["image_processing"], reader.reader_entity, reader.reader_entity ? "" : "— scegli —");
+    this._q("#setCamera").innerHTML = this._entityOptions(["camera"], reader.camera_entity, "Nessuna");
+    const notify = this._data.settings.notify;
+    const available = this._notifyServices();
+    const all = [...available, ...notify.services.filter((s) => !available.includes(s))];
+    this._q("#notifyDevices").innerHTML = all.length
+      ? all.map((s) => `<label class="inline"><input type="checkbox" data-notify="${esc(s)}" ${notify.services.includes(s) ? "checked" : ""}>
+          ${esc(s.replace("notify.mobile_app_", "").replace("notify.", ""))}${available.includes(s) ? "" : " (non trovato)"}</label>`).join("")
+      : `<div class="hint">Nessun telefono trovato. Installa l'app Home Assistant sul telefono e accedi: comparirà qui.</div>`;
+    this._q("#notifyGranted").checked = !!notify.on_granted;
+    this._q("#notifyDenied").checked = !!notify.on_denied;
+  }
+
+  _renderDoorList() {
+    const box = this._q("#doorList");
+    if (!this._data) return;
+    const doors = this._data.doors;
+    if (!doors.length) {
+      box.innerHTML = `<div class="empty">Nessuna porta. Aggiungine una per poter aprire con i QR.</div>`;
+      return;
+    }
+    box.innerHTML = doors.map((d) => {
+      const key = `doordel:${d.id}`;
+      const armed = this._confirmKey === key;
+      return `<div class="row">
+        <div class="main"><div class="name">${esc(d.name)}</div>
+          <div class="meta">${esc(d.door_entity)} · ${esc(d.open_seconds)} s</div></div>
+        <div class="actions">
+          <button class="small" data-door="edit" data-id="${esc(d.id)}">Modifica</button>
+          <button class="small danger ${armed ? "armed" : ""}" data-door="delete" data-id="${esc(d.id)}" ${doors.length < 2 ? "disabled title=\"Deve restare almeno una porta\"" : ""}>${armed ? "Conferma?" : "Elimina"}</button>
+        </div></div>`;
+    }).join("");
+  }
+
+  _openDoor(id) {
+    const d = id ? this._data.doors.find((x) => x.id === id) : null;
+    this._doorEditId = d ? d.id : null;
+    this._q("#doorModalTitle").textContent = d ? `Modifica "${d.name}"` : "Nuova porta";
+    this._q("#doorName").value = d ? d.name : "";
+    this._q("#doorEntity").innerHTML = this._entityOptions(["switch", "light", "input_boolean"], d ? d.door_entity : null, d ? "" : "— scegli —");
+    this._q("#doorSeconds").value = d ? d.open_seconds : 3;
+    this._setMsg("#doorMsg", "", false);
+    this._q("#doorModal").hidden = false;
+  }
+
+  _closeDoor() {
+    const modal = this._q("#doorModal");
+    if (modal) modal.hidden = true;
+    this._doorEditId = null;
+  }
+
+  async _saveDoor() {
+    const name = this._q("#doorName").value.trim();
+    const entity = this._q("#doorEntity").value;
+    const seconds = parseInt(this._q("#doorSeconds").value, 10);
+    if (!name) return this._setMsg("#doorMsg", "Scrivi un nome per la porta.", true);
+    if (!entity) return this._setMsg("#doorMsg", "Scegli il relè.", true);
+    if (!Number.isInteger(seconds)) return this._setMsg("#doorMsg", "Indica i secondi di apertura.", true);
+    const btn = this._q("#doorSave");
+    btn.disabled = true;
+    try {
+      if (this._doorEditId) {
+        await this._hass.callWS({
+          type: "qr_guest_access/door_update", door_id: this._doorEditId,
+          name, door_entity: entity, open_seconds: seconds,
+        });
+      } else {
+        await this._hass.callWS({
+          type: "qr_guest_access/door_add", name, door_entity: entity, open_seconds: seconds,
+        });
+      }
+      this._closeDoor();
+      await this._refresh();
+    } catch (err) {
+      this._setMsg("#doorMsg", (err && err.message) || "Salvataggio non riuscito.", true);
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  async _doorAction(action, id) {
+    try {
+      if (action === "edit") {
+        this._openDoor(id);
+      } else if (action === "delete") {
+        if (!this._armConfirm(`doordel:${id}`)) return;
+        await this._hass.callWS({ type: "qr_guest_access/door_delete", door_id: id });
+        await this._refresh();
+      }
+    } catch (err) {
+      this._toast((err && err.message) || "Operazione non riuscita.");
+    }
+  }
+
+  async _saveReader() {
+    const reader = this._q("#setReader").value;
+    const camera = this._q("#setCamera").value;
+    if (!reader) return this._setMsg("#readerMsg", "Scegli il lettore QR.", true);
+    try {
+      await this._hass.callWS({
+        type: "qr_guest_access/set_reader", reader_entity: reader, camera_entity: camera || null,
+      });
+      this._setMsg("#readerMsg", "Salvato.", false);
+      this._q("#camBox").dataset.mode = "";
+      await this._refresh();
+    } catch (err) {
+      this._setMsg("#readerMsg", (err && err.message) || "Salvataggio non riuscito.", true);
+    }
+  }
+
+  _readNotify() {
+    return {
+      services: [...this._q("#notifyDevices").querySelectorAll("input[data-notify]")]
+        .filter((b) => b.checked).map((b) => b.dataset.notify),
+      on_granted: this._q("#notifyGranted").checked,
+      on_denied: this._q("#notifyDenied").checked,
+    };
+  }
+
+  async _saveNotify() {
+    try {
+      await this._hass.callWS({ type: "qr_guest_access/set_notify", ...this._readNotify() });
+      this._setMsg("#notifyMsg", "Salvato.", false);
+      await this._refresh();
+    } catch (err) {
+      this._setMsg("#notifyMsg", (err && err.message) || "Salvataggio non riuscito.", true);
+    }
+  }
+
+  async _testNotify() {
+    try {
+      // la prova usa ciò che è salvato: salviamo prima la scelta attuale
+      await this._hass.callWS({ type: "qr_guest_access/set_notify", ...this._readNotify() });
+      const res = await this._hass.callWS({ type: "qr_guest_access/test_notify" });
+      this._setMsg("#notifyMsg", res.failed.length
+        ? `Non raggiunti: ${res.failed.join(", ")}`
+        : "Notifica inviata: controlla il telefono.", res.failed.length > 0);
+      await this._refresh();
+    } catch (err) {
+      this._setMsg("#notifyMsg", (err && err.message) || "Invio non riuscito.", true);
+    }
   }
 
   // ---- azioni ------------------------------------------------------------------------
@@ -590,6 +954,8 @@ class QRGuestAccessPanel extends HTMLElement {
 
     if (!name) return this._setMsg("#createMsg", "Scrivi un nome per il QR.", true);
     if (!unlimited && !Number.isInteger(uses)) return this._setMsg("#createMsg", "Indica il numero di accessi.", true);
+    const doors = this._readDoorChecks("#createDoorChecks");
+    if (doors && !doors.length) return this._setMsg("#createMsg", "Scegli almeno una porta.", true);
 
     const btn = this._q("#createBtn");
     btn.disabled = true;
@@ -601,6 +967,7 @@ class QRGuestAccessPanel extends HTMLElement {
         valid_from: from ? new Date(from).toISOString() : null,
         valid_until: until ? new Date(until).toISOString() : null,
         max_uses: unlimited ? null : uses,
+        doors,
       });
       this._lastCreated = res;
       this._showResult(res);
@@ -653,8 +1020,10 @@ class QRGuestAccessPanel extends HTMLElement {
     this._confirmTimer = setTimeout(() => {
       this._confirmKey = null;
       this._renderTokens();
+      this._renderDoorList();
     }, 3000);
     this._renderTokens();
+    this._renderDoorList();
     return false;
   }
 
@@ -703,6 +1072,8 @@ class QRGuestAccessPanel extends HTMLElement {
       : `Usato ${t.uses_count} ${t.uses_count === 1 ? "volta" : "volte"} · ${t.uses_left} ${t.uses_left === 1 ? "accesso rimasto" : "accessi rimasti"}`;
     this._q("#editFrom").value = t.valid_from ? toLocalInput(new Date(t.valid_from)) : "";
     this._q("#editUntil").value = t.valid_until ? toLocalInput(new Date(t.valid_until)) : "";
+    this._q("#editDoors").hidden = this._data.doors.length < 2;
+    this._q("#editDoorChecks").innerHTML = this._doorChecksHtml(t.doors);
     this._q("#editUnlimited").checked = unlimited;
     this._q("#editUses").value = unlimited ? 1 : Math.max(t.uses_left, 1);
     this._syncEditUnlimited();
@@ -727,6 +1098,8 @@ class QRGuestAccessPanel extends HTMLElement {
     const unlimited = this._q("#editUnlimited").checked;
     const uses = parseInt(this._q("#editUses").value, 10);
     if (!unlimited && !Number.isInteger(uses)) return this._setMsg("#editMsg", "Indica il numero di accessi.", true);
+    const doors = this._readDoorChecks("#editDoorChecks");
+    if (doors && !doors.length) return this._setMsg("#editMsg", "Scegli almeno una porta.", true);
 
     const btn = this._q("#editSave");
     btn.disabled = true;
@@ -738,6 +1111,7 @@ class QRGuestAccessPanel extends HTMLElement {
         valid_from: from ? new Date(from).toISOString() : null,
         valid_until: until ? new Date(until).toISOString() : null,
         uses_left: unlimited ? null : uses,
+        doors,
       });
       this._closeEdit();
       await this._refresh();
@@ -776,7 +1150,9 @@ class QRGuestAccessPanel extends HTMLElement {
         this._setMsg("#simResult", "Testo ignorato: è uno dei valori che il lettore usa per dire \"nessun QR\".", false);
       } else {
         const r = RESULT[res.result] || { label: res.result };
-        const door = res.test ? "porta non aperta (modalità test)" : res.door_opened ? "porta aperta" : "porta chiusa";
+        const names = (res.doors || []).join(", ");
+        const door = res.test ? `porte non aperte (modalità test)${names ? `: ${names}` : ""}`
+          : res.door_opened ? `aperta: ${names}` : "porta chiusa";
         this._setMsg("#simResult", `${r.label} · ${door}`, !(res.result === "granted"));
       }
     } catch (err) {

@@ -19,25 +19,20 @@
       }
     }
   },
-  "options": {
-    "step": {
-      "init": {
-        "title": "QR Guest Access settings",
-        "data": {
-          "reader_entity": "QR reader",
-          "door_entity": "Door (Shelly relay)",
-          "camera_entity": "Camera (optional)",
-          "open_seconds": "Seconds open"
-        }
-      }
-    }
-  },
   "entity": {
     "sensor": {
-      "active_tokens": { "name": "Active QR codes" },
-      "granted": { "name": "Accesses granted" },
-      "denied": { "name": "Accesses denied" },
-      "last_access": { "name": "Last access" }
+      "active_tokens": {
+        "name": "Active QR codes"
+      },
+      "granted": {
+        "name": "Accesses granted"
+      },
+      "denied": {
+        "name": "Accesses denied"
+      },
+      "last_access": {
+        "name": "Last access"
+      }
     }
   },
   "services": {
@@ -45,43 +40,82 @@
       "name": "Create QR",
       "description": "Creates a new access QR code. Single-use and valid immediately unless told otherwise.",
       "fields": {
-        "name": { "name": "Name", "description": "Name of the QR code, e.g. the guest." },
-        "valid_from": { "name": "Valid from", "description": "Start of validity. Empty means now." },
-        "valid_until": { "name": "Valid until", "description": "End of validity. Required for unlimited accesses." },
-        "max_uses": { "name": "Number of accesses", "description": "How many times it can be used." },
-        "unlimited": { "name": "Unlimited accesses", "description": "Ignores the number of accesses; requires an end date." }
+        "name": {
+          "name": "Name",
+          "description": "Name of the QR code, e.g. the guest."
+        },
+        "valid_from": {
+          "name": "Valid from",
+          "description": "Start of validity. Empty means now."
+        },
+        "valid_until": {
+          "name": "Valid until",
+          "description": "End of validity. Required for unlimited accesses."
+        },
+        "max_uses": {
+          "name": "Number of accesses",
+          "description": "How many times it can be used."
+        },
+        "unlimited": {
+          "name": "Unlimited accesses",
+          "description": "Ignores the number of accesses; requires an end date."
+        }
       }
     },
     "revoke_qr": {
       "name": "Revoke QR",
       "description": "Makes a QR code unusable.",
       "fields": {
-        "id": { "name": "ID", "description": "The QR code ID (returned by Create QR)." }
+        "id": {
+          "name": "ID",
+          "description": "The QR code ID (returned by Create QR)."
+        }
       }
     },
     "restore_qr": {
       "name": "Restore QR",
       "description": "Re-enables a revoked QR code. It returns as it was: if it has meanwhile expired or run out, it stays that way.",
       "fields": {
-        "id": { "name": "ID", "description": "The ID of the revoked QR code." }
+        "id": {
+          "name": "ID",
+          "description": "The ID of the revoked QR code."
+        }
       }
     },
     "update_qr": {
       "name": "Edit QR",
       "description": "Changes the dates and accesses of a QR code. Empty fields are left unchanged.",
       "fields": {
-        "id": { "name": "ID", "description": "The QR code ID." },
-        "valid_from": { "name": "Valid from", "description": "New start of validity." },
-        "valid_until": { "name": "Valid until", "description": "New end of validity." },
-        "uses_left": { "name": "Accesses available", "description": "How many accesses remain from now on." },
-        "unlimited": { "name": "Unlimited accesses", "description": "Makes accesses unlimited (requires an end date)." }
+        "id": {
+          "name": "ID",
+          "description": "The QR code ID."
+        },
+        "valid_from": {
+          "name": "Valid from",
+          "description": "New start of validity."
+        },
+        "valid_until": {
+          "name": "Valid until",
+          "description": "New end of validity."
+        },
+        "uses_left": {
+          "name": "Accesses available",
+          "description": "How many accesses remain from now on."
+        },
+        "unlimited": {
+          "name": "Unlimited accesses",
+          "description": "Makes accesses unlimited (requires an end date)."
+        }
       }
     },
     "simulate_scan": {
       "name": "Simulate scan",
       "description": "Runs the same procedure as a camera reading.",
       "fields": {
-        "code": { "name": "Code", "description": "The text the camera would have read." }
+        "code": {
+          "name": "Code",
+          "description": "The text the camera would have read."
+        }
       }
     }
   }

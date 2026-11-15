@@ -1,10 +1,11 @@
-# QR Guest Access (v1.0 · tappa 1)
+# QR Guest Access (v1.1)
 
 Apri una porta con QR code temporanei, direttamente da Home Assistant.
 
 - **Lettore**: l'integrazione `qrcode` di Home Assistant legge la telecamera (già provata e funzionante).
-- **Questa integrazione**: crea i QR, decide se sono validi, apre la Shelly, tiene lo storico.
-- **Pannello "Accessi ospiti"** nella barra laterale: crea QR (nome, inizio, fine, numero di accessi), scarica il PNG, revoca, prova scansioni senza telecamera, storico, anteprima camera.
+- **Questa integrazione**: crea i QR, decide se sono validi, apre le porte (uno o più relè Shelly), tiene lo storico.
+- **Pannello "Accessi ospiti"** nella barra laterale: crea QR (nome, inizio, fine, numero di accessi, porte che apre), scarica il PNG, revoca, prova scansioni senza telecamera, storico **con ricerca**, anteprima camera.
+- **Impostazioni** (pulsante ⚙ nel pannello): porte, lettore/telecamera, notifiche sul telefono.
 
 Telegram arriverà nella tappa 3. Per ora tutto si gestisce dal pannello.
 
@@ -37,10 +38,23 @@ Gli aggiornamenti arrivano come aggiornamenti normali di Home Assistant, in base
 2. **Riavvia Home Assistant.** Alla partenza installa da solo la libreria `segno` (serve a disegnare i QR): serve internet.
 3. *Impostazioni → Dispositivi e servizi → Aggiungi integrazione → "QR Guest Access"* e scegli:
    - **Lettore QR**: l'entità `image_processing.qr_...` che già funziona;
-   - **Porta**: l'interruttore della Shelly 1;
+   - **Porta**: l'interruttore della Shelly 1 (la prima porta);
    - **Telecamera** (facoltativa): solo per l'anteprima nel pannello;
    - **Secondi di apertura**: 3.
 4. Nella barra laterale compare **Accessi ospiti** (solo per amministratori).
+5. Altre porte, un lettore diverso e le notifiche si impostano dal pannello (vedi "Impostazioni").
+
+**Aggiornamento dalla 1.0.x:** nessuna operazione. Al primo avvio la porta e il lettore già configurati diventano la porta "Porta" e il lettore delle Impostazioni, e tutti i QR esistenti continuano a funzionare. Il menu *Configura* dell'integrazione non c'è più: ora si fa tutto dalle Impostazioni del pannello.
+
+## Impostazioni (⚙ nel pannello)
+
+- **Porte**: aggiungi, rinomina, cambia il relè o i secondi di apertura, elimina (deve restarne una). Esempio: "Cancello" (`switch.shelly_cancello`, 3 s) e "Garage" (`switch.shelly_basculante`, 10 s).
+- **Lettore e telecamera**: scegli il lettore QR (`image_processing`) e, se vuoi, la telecamera per l'anteprima. Si cambiano senza riavviare.
+- **Notifiche sul telefono**: spunta i telefoni con l'app Home Assistant (`notify.mobile_app_...`). Ricevono "Mario ha aperto: Cancello, Garage". Puoi avere l'avviso anche per i tentativi negati (QR scaduto, sconosciuto…). Se una porta non risponde l'avviso arriva sempre. **Invia notifica di prova** per controllare. In modalità test non parte nessuna notifica.
+
+### Più porte: come funziona
+
+C'è **un solo lettore**. Ogni QR apre **tutte le porte** oppure **solo quelle spuntate** alla creazione (o dopo, con *Modifica*). Un passaggio del QR apre insieme tutte le sue porte e conta **come un solo accesso**: per aprire il cancello e il garage serve un QR con entrambe le porte, non due. Se una porta non risponde e l'altra sì, l'accesso è consentito e nello storico vedi quale non si è aperta; se nessuna risponde l'accesso viene restituito. Le porte aggiunte più avanti si aprono anche con i QR "tutte le porte".
 
 ### Configurazione consigliata del lettore (`configuration.yaml`)
 
@@ -67,7 +81,7 @@ image_processing:
 
 ### Rete di sicurezza sulla Shelly
 
-Nelle impostazioni del relè della Shelly (web UI della Shelly, sezione *Timer* / *Auto-off*) imposta lo spegnimento automatico a **3 secondi**. L'integrazione spegne già il relè da sola, ma così la porta si richiude anche se Home Assistant si blocca mentre è aperta.
+Nelle impostazioni del relè della Shelly (web UI della Shelly, sezione *Timer* / *Auto-off*) imposta lo spegnimento automatico a **3 secondi** (o quanto hai scelto per quella porta). Vale per ogni porta. L'integrazione spegne già il relè da sola, ma così la porta si richiude anche se Home Assistant si blocca mentre è aperta.
 
 ## 3. Primo test (a porta "chiusa")
 
@@ -96,11 +110,12 @@ All'installazione la **modalità test è attiva**: i QR validi vengono riconosci
 - I QR contengono solo un codice casuale (`QG-` + 32 caratteri), mai nomi o dati.
 - Di un QR già creato puoi cambiare **date e accessi** con il pulsante *Modifica*: nuovo inizio, nuova fine, quanti accessi restano **da adesso** (gli usi già fatti restano nello storico), oppure accessi illimitati (serve una data di fine). Così puoi rinnovare un QR scaduto o esaurito: torna attivo se le nuove date e i nuovi accessi lo permettono. Il nome e il codice del QR non cambiano, quindi il PNG già scaricato o stampato continua a valere.
 - Un QR revocato si può **riabilitare** dal pannello (pulsante *Riabilita*): torna com'era, con gli stessi accessi rimasti. Se nel frattempo è scaduto o esaurito, resta tale.
+- Nello **Storico** la barra di ricerca cerca per nome, porta o codice in tutte le ultime 500 scansioni (l'elenco mostra le ultime 100).
 - Gli orari nel pannello sono quelli del dispositivo che usi; nei servizi di HA, quelli del fuso orario di Home Assistant.
 
 ## 5. Per le automazioni
 
-**Evento** `qr_guest_access_scan` (ad ogni scansione registrata): `name`, `result`, `door_opened`, `test`, `source`, `time`. Esiti: `granted`, `denied_unknown`, `denied_revoked`, `denied_expired`, `denied_not_started`, `denied_exhausted`, `error`.
+**Evento** `qr_guest_access_scan` (ad ogni scansione registrata): `name`, `result`, `door_opened`, `doors` (elenco dei nomi delle porte aperte), `test`, `source`, `time`. Esiti: `granted`, `denied_unknown`, `denied_revoked`, `denied_expired`, `denied_not_started`, `denied_exhausted`, `denied_no_door` (QR senza porte abilitate), `error`.
 
 ```yaml
 automation:
@@ -116,8 +131,10 @@ automation:
     actions:
       - action: notify.notify
         data:
-          message: "{{ trigger.event.data.name }} ha aperto la porta"
+          message: "{{ trigger.event.data.name }} ha aperto: {{ trigger.event.data.doors | join(', ') }}"
 ```
+
+(Per un semplice avviso sul telefono non serve: usa le notifiche delle Impostazioni.)
 
 **Sensori**: QR attivi, accessi consentiti, accessi negati, ultimo accesso.
 
@@ -141,7 +158,9 @@ automation:
 | Il QR non viene letto | controlla l'anteprima nel pannello: QR grande, a fuoco, senza riflessi; schermo del telefono alla massima luminosità |
 | Lo stesso QR non riapre subito | è normale: cooldown di 10 secondi |
 | La porta non si apre ma lo storico dice "consentito" | modalità test ancora attiva (banner giallo) |
-| Storico con "Errore porta" | l'interruttore della Shelly non risponde: guarda i log di HA |
+| Storico con "Errore porta" | nessun relè ha risposto: guarda i log di HA. Se solo una porta non si apre, la riga dice quale |
+| Una porta non si apre con un QR | controlla che il QR abbia quella porta spuntata (*Modifica*) |
+| Le notifiche non arrivano | Impostazioni → Notifiche → *Invia notifica di prova*; controlla che l'app sul telefono sia collegata a HA |
 
 Log dettagliati: in `configuration.yaml`
 

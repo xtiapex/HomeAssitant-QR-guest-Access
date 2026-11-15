@@ -31,6 +31,10 @@ class ShellyDoor:
         self._cancel_off: Callable[[], None] | None = None
         self._is_on = False
 
+    @property
+    def entity_id(self) -> str:
+        return self._entity_id
+
     async def open(self, seconds: float) -> None:
         self._cancel_timer()
         await self._hass.services.async_call(
@@ -82,3 +86,31 @@ class ShellyDoor:
         self._cancel_timer()
         if self._is_on:
             await self._async_turn_off()
+
+
+class DoorHub:
+    """Apre le porte per id: un ShellyDoor per ogni relè.
+
+    Se due porte usano lo stesso relè condividono lo stesso ShellyDoor (un solo
+    timer). Se il relè di una porta viene cambiato dalle impostazioni, il
+    vecchio relè viene richiuso subito.
+    """
+
+    def __init__(self, hass: HomeAssistant, entity_of: Callable[[str], str | None]) -> None:
+        self._hass = hass
+        self._entity_of = entity_of
+        self._relays: dict[str, ShellyDoor] = {}
+
+    async def open(self, door_id: str, seconds: float) -> None:
+        entity_id = self._entity_of(door_id)
+        if entity_id is None:
+            raise ValueError("Porta non configurata.")
+        relay = self._relays.get(entity_id)
+        if relay is None:
+            relay = self._relays[entity_id] = ShellyDoor(self._hass, entity_id)
+        await relay.open(seconds)
+
+    async def async_shutdown(self) -> None:
+        for relay in list(self._relays.values()):
+            await relay.async_shutdown()
+        self._relays.clear()

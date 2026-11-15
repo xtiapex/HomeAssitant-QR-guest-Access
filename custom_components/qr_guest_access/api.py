@@ -43,6 +43,7 @@ def ws_state(hass: HomeAssistant, connection: websocket_api.ActiveConnection, ms
         vol.Optional("valid_from"): vol.Any(str, None),
         vol.Optional("valid_until"): vol.Any(str, None),
         vol.Optional("max_uses"): vol.Any(int, None),
+        vol.Optional("doors"): vol.Any([str], None),
     }
 )
 @websocket_api.async_response
@@ -55,6 +56,7 @@ async def ws_create(hass: HomeAssistant, connection: websocket_api.ActiveConnect
             valid_from=to_utc(msg.get("valid_from")),
             valid_until=to_utc(msg.get("valid_until")),
             max_uses=msg.get("max_uses"),
+            doors=msg.get("doors"),
         )
     except ValueError as err:
         connection.send_error(msg["id"], "invalid_format", str(err))
@@ -129,6 +131,7 @@ def ws_restore(hass: HomeAssistant, connection: websocket_api.ActiveConnection, 
         vol.Optional("valid_from"): vol.Any(str, None),
         vol.Optional("valid_until"): vol.Any(str, None),
         vol.Optional("uses_left"): vol.Any(int, None),
+        vol.Optional("doors"): vol.Any([str], None),
     }
 )
 @callback
@@ -143,6 +146,8 @@ def ws_update(hass: HomeAssistant, connection: websocket_api.ActiveConnection, m
             changes["valid_until"] = to_utc(msg["valid_until"])
         if "uses_left" in msg:
             changes["uses_left"] = msg["uses_left"]
+        if "doors" in msg:
+            changes["doors"] = msg["doors"]
         token = manager.engine.update_token(msg["token_id"], **changes)
     except ValueError as err:
         connection.send_error(msg["id"], "invalid_format", str(err))
@@ -208,6 +213,149 @@ def ws_clear_logs(hass: HomeAssistant, connection: websocket_api.ActiveConnectio
     connection.send_result(msg["id"], {})
 
 
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "qr_guest_access/logs",
+        vol.Optional("query"): vol.Any(str, None),
+        vol.Optional("limit", default=200): vol.All(int, vol.Range(min=1, max=500)),
+    }
+)
+@callback
+def ws_logs(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """Ricerca nello storico (fino a 500 voci), per nome, porta o codice."""
+    if (manager := _get_manager(hass, connection, msg)) is None:
+        return
+    connection.send_result(
+        msg["id"], {"logs": manager.engine.search_logs(msg.get("query"), msg["limit"])}
+    )
+
+
+def _check_entity(hass: HomeAssistant, entity_id: str | None, label: str) -> None:
+    if entity_id and hass.states.get(entity_id) is None:
+        raise ValueError(f"{label}: l'entità {entity_id} non esiste in Home Assistant.")
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "qr_guest_access/door_add",
+        vol.Required("name"): str,
+        vol.Required("door_entity"): str,
+        vol.Required("open_seconds"): int,
+    }
+)
+@callback
+def ws_door_add(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    if (manager := _get_manager(hass, connection, msg)) is None:
+        return
+    try:
+        _check_entity(hass, msg["door_entity"], "Relè")
+        door = manager.engine.add_door(msg["name"], msg["door_entity"], msg["open_seconds"])
+    except ValueError as err:
+        connection.send_error(msg["id"], "invalid_format", str(err))
+        return
+    connection.send_result(msg["id"], {"door": door})
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "qr_guest_access/door_update",
+        vol.Required("door_id"): str,
+        vol.Required("name"): str,
+        vol.Required("door_entity"): str,
+        vol.Required("open_seconds"): int,
+    }
+)
+@callback
+def ws_door_update(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    if (manager := _get_manager(hass, connection, msg)) is None:
+        return
+    try:
+        _check_entity(hass, msg["door_entity"], "Relè")
+        door = manager.engine.update_door(
+            msg["door_id"], msg["name"], msg["door_entity"], msg["open_seconds"]
+        )
+    except ValueError as err:
+        connection.send_error(msg["id"], "invalid_format", str(err))
+        return
+    connection.send_result(msg["id"], {"door": door})
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {vol.Required("type"): "qr_guest_access/door_delete", vol.Required("door_id"): str}
+)
+@callback
+def ws_door_delete(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    if (manager := _get_manager(hass, connection, msg)) is None:
+        return
+    try:
+        manager.engine.delete_door(msg["door_id"])
+    except ValueError as err:
+        connection.send_error(msg["id"], "invalid_format", str(err))
+        return
+    connection.send_result(msg["id"], {})
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "qr_guest_access/set_reader",
+        vol.Required("reader_entity"): str,
+        vol.Optional("camera_entity"): vol.Any(str, None),
+    }
+)
+@callback
+def ws_set_reader(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    if (manager := _get_manager(hass, connection, msg)) is None:
+        return
+    try:
+        _check_entity(hass, msg["reader_entity"], "Lettore")
+        _check_entity(hass, msg.get("camera_entity"), "Telecamera")
+        manager.engine.set_reader(msg["reader_entity"], msg.get("camera_entity"))
+    except ValueError as err:
+        connection.send_error(msg["id"], "invalid_format", str(err))
+        return
+    connection.send_result(msg["id"], {})
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "qr_guest_access/set_notify",
+        vol.Required("services"): [str],
+        vol.Required("on_granted"): bool,
+        vol.Required("on_denied"): bool,
+    }
+)
+@callback
+def ws_set_notify(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    if (manager := _get_manager(hass, connection, msg)) is None:
+        return
+    try:
+        settings = manager.engine.set_notify(msg["services"], msg["on_granted"], msg["on_denied"])
+    except ValueError as err:
+        connection.send_error(msg["id"], "invalid_format", str(err))
+        return
+    connection.send_result(msg["id"], {"notify": settings})
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command({vol.Required("type"): "qr_guest_access/test_notify"})
+@websocket_api.async_response
+async def ws_test_notify(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    if (manager := _get_manager(hass, connection, msg)) is None:
+        return
+    try:
+        failed = await manager.async_test_notify()
+    except ValueError as err:
+        connection.send_error(msg["id"], "invalid_format", str(err))
+        return
+    connection.send_result(msg["id"], {"failed": failed})
+
+
 def async_register_api(hass: HomeAssistant) -> None:
     """Registra i comandi (una sola volta, da async_setup)."""
     for command in (
@@ -221,5 +369,12 @@ def async_register_api(hass: HomeAssistant) -> None:
         ws_simulate,
         ws_set_test_mode,
         ws_clear_logs,
+        ws_logs,
+        ws_door_add,
+        ws_door_update,
+        ws_door_delete,
+        ws_set_reader,
+        ws_set_notify,
+        ws_test_notify,
     ):
         websocket_api.async_register_command(hass, command)
