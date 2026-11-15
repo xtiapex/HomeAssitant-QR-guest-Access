@@ -22,6 +22,17 @@ I dati della vecchia versione (`.storage/qr_guest_access`) non vengono usati né
 
 ## 2. Installazione
 
+### Metodo consigliato: Marketplace di Home Assistant (2026.11 o successivo)
+
+1. *Impostazioni → Marketplace*, accetta l'avviso sui rischi (solo la prima volta).
+2. Cerca l'opzione **Add from link** (aggiungi da link) e incolla `https://github.com/xtiapex/HomeAssitant-QR-guest-Access`. Per i repository personalizzati il Marketplace chiede di collegarti a GitHub con l'accesso da dispositivo: approvi su GitHub, senza inserire password in HA.
+3. Apri "QR Guest Access" e premi **Install**. Per una nuova integrazione non serve riavviare.
+4. Passa direttamente alla configurazione (punto 3 qui sotto).
+
+Gli aggiornamenti arrivano come aggiornamenti normali di Home Assistant, in base alle **release** pubblicate su GitHub (vedi la sezione "Aggiornare l'integrazione"). Senza release il Marketplace usa l'ultimo commit.
+
+### Metodo manuale
+
 1. Copia la cartella `custom_components/qr_guest_access` in `/config/custom_components/` (add-on *Samba share* o *File editor*).
 2. **Riavvia Home Assistant.** Alla partenza installa da solo la libreria `segno` (serve a disegnare i QR): serve internet.
 3. *Impostazioni → Dispositivi e servizi → Aggiungi integrazione → "QR Guest Access"* e scegli:
