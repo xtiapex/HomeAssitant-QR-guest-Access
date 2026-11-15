@@ -61,6 +61,9 @@ SOURCE_SIMULATE = "simulate"
 # Valori che il lettore QR usa per dire "nessun codice visibile"
 IGNORED_CODES = {"", "unknown", "unavailable", "none"}
 
+# "non specificato" (None ha già un significato: nessuna data di fine / illimitati)
+_UNSET: Any = object()
+
 
 class DoorDriver(Protocol):
     """Qualcosa che sa aprire la porta."""
@@ -261,6 +264,67 @@ class AccessEngine:
         record["revoked"] = False
         self._changed()
         return True
+
+    def update_token(
+        self,
+        token_id: str,
+        valid_from: datetime | None = _UNSET,
+        valid_until: datetime | None = _UNSET,
+        uses_left: int | None = _UNSET,
+    ) -> dict[str, Any]:
+        """Modifica date e accessi di un token (il nome e il codice restano fissi).
+
+        - valid_from: None o non indicato = lascia l'inizio com'è.
+        - valid_until: non indicato = lascia com'è; None = nessuna data di fine.
+        - uses_left: non indicato = lascia com'è; None = accessi illimitati;
+          un numero = quanti accessi restano DA ORA (gli usi già fatti restano nel conteggio).
+        Un token scaduto o esaurito torna attivo se la modifica lo permette.
+        Solleva ValueError (messaggio in italiano) se la modifica non è valida.
+        """
+        record = self._data["tokens"].get(token_id)
+        if record is None:
+            raise ValueError("Token non trovato.")
+        now = self._clock()
+
+        new_from = _parse(record["valid_from"])
+        if valid_from is not _UNSET and valid_from is not None:
+            new_from = valid_from
+
+        if valid_until is _UNSET:
+            new_until = _parse(record["valid_until"]) if record["valid_until"] else None
+        else:
+            new_until = valid_until
+            # una data di fine già passata si rifiuta solo se la stai cambiando adesso
+            if (
+                new_until is not None
+                and new_until <= now
+                and _iso(new_until) != record["valid_until"]
+            ):
+                raise ValueError("La data di fine è già passata.")
+        if new_until is not None and new_until <= new_from:
+            raise ValueError("La data di fine deve essere successiva a quella di inizio.")
+
+        if uses_left is _UNSET:
+            new_max, new_left = record["max_uses"], record["uses_left"]
+        elif uses_left is None:
+            new_max = new_left = None
+        else:
+            if isinstance(uses_left, bool) or not isinstance(uses_left, int):
+                raise ValueError("Il numero di accessi deve essere un intero.")
+            if not 1 <= uses_left <= MAX_USES_LIMIT:
+                raise ValueError(f"Il numero di accessi deve essere tra 1 e {MAX_USES_LIMIT}.")
+            new_left = uses_left
+            new_max = record["uses_count"] + uses_left
+
+        if new_left is None and new_until is None:
+            raise ValueError("Con accessi illimitati serve una data di fine validità.")
+
+        record["valid_from"] = _iso(new_from)
+        record["valid_until"] = _iso(new_until) if new_until else None
+        record["max_uses"] = new_max
+        record["uses_left"] = new_left
+        self._changed()
+        return self._public(record, now)
 
     def delete_token(self, token_id: str) -> bool:
         record = self._data["tokens"].pop(token_id, None)

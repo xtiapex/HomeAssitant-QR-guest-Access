@@ -122,6 +122,8 @@ const TEMPLATE = `
   .modal .box { background: var(--card-background-color); border-radius: 14px; padding: 20px; text-align: center;
                 max-width: 340px; width: 100%; }
   .modal h3 { margin: 0 0 12px; font-size: 16px; font-weight: 500; overflow-wrap: anywhere; }
+  .modal.edit .box { max-width: 420px; text-align: left; }
+  .modal.edit h3 { margin-bottom: 4px; }
   .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 30; max-width: min(92vw, 520px);
            background: var(--error-color, #db4437); color: #fff; padding: 12px 18px; border-radius: 10px; font-size: 14px;
            box-shadow: 0 4px 16px rgba(0,0,0,.35); }
@@ -201,6 +203,23 @@ const TEMPLATE = `
 </div>
 
 <div class="toast" id="toast" role="alert" hidden></div>
+
+<div class="modal edit" id="editModal" hidden>
+  <div class="box">
+    <h3 id="editTitle"></h3>
+    <div class="hint" id="editInfo"></div>
+    <div class="two">
+      <div><label class="f" for="editFrom">Valido dal</label><input type="datetime-local" id="editFrom"></div>
+      <div><label class="f" for="editUntil">Valido fino al</label><input type="datetime-local" id="editUntil"></div>
+    </div>
+    <label class="f" for="editUses">Accessi disponibili da adesso</label>
+    <input type="number" id="editUses" min="1" max="999" value="1">
+    <label class="inline"><input type="checkbox" id="editUnlimited"> Accessi illimitati (richiede una data di fine)</label>
+    <div class="hint">Gli accessi già usati restano nello storico. Un QR scaduto o esaurito torna attivo se le nuove date e i nuovi accessi lo permettono.</div>
+    <div class="msg" id="editMsg"></div>
+    <div class="actions" style="justify-content:flex-end"><button id="editCancel">Annulla</button><button class="primary" id="editSave">Salva</button></div>
+  </div>
+</div>
 
 <div class="modal" id="modal" hidden>
   <div class="box">
@@ -304,11 +323,15 @@ class QRGuestAccessPanel extends HTMLElement {
     this._q("#simBtn").addEventListener("click", () => this._simulate());
     this._q("#clearLogs").addEventListener("click", (e) => this._clearLogs(e.currentTarget));
     this._q("#modalClose").addEventListener("click", () => this._closeModal());
+    this._q("#editCancel").addEventListener("click", () => this._closeEdit());
+    this._q("#editSave").addEventListener("click", () => this._saveEdit());
+    this._q("#editUnlimited").addEventListener("change", () => this._syncEditUnlimited());
+    this._q("#editModal").addEventListener("click", (e) => { if (e.target.id === "editModal") this._closeEdit(); });
     this._q("#modal").addEventListener("click", (e) => { if (e.target.id === "modal") this._closeModal(); });
     this._q("#modalDownload").addEventListener("click", () => {
       if (this._modalImage) this._download(this._modalImage.filename, this._modalImage.b64);
     });
-    this.shadowRoot.addEventListener("keydown", (e) => { if (e.key === "Escape") this._closeModal(); });
+    this.shadowRoot.addEventListener("keydown", (e) => { if (e.key === "Escape") { this._closeModal(); this._closeEdit(); } });
 
     this.shadowRoot.querySelectorAll("[data-preset]").forEach((btn) =>
       btn.addEventListener("click", () => this._applyPreset(btn.dataset.preset)));
@@ -478,6 +501,7 @@ class QRGuestAccessPanel extends HTMLElement {
         </div>
         <div class="actions">
           ${live ? `<button class="small" data-act="qr" data-id="${esc(t.id)}">Mostra QR</button>` : ""}
+          <button class="small" data-act="edit" data-id="${esc(t.id)}">Modifica</button>
           ${t.status === "revoked"
             ? `<button class="small" data-act="restore" data-id="${esc(t.id)}">Riabilita</button>`
             : `<button class="small danger ${this._confirmKey === rKey ? "armed" : ""}" data-act="revoke" data-id="${esc(t.id)}">${this._confirmKey === rKey ? "Conferma?" : "Revoca"}</button>`}
@@ -636,7 +660,9 @@ class QRGuestAccessPanel extends HTMLElement {
 
   async _tokenAction(action, id) {
     try {
-      if (action === "qr") {
+      if (action === "edit") {
+        this._openEdit(id);
+      } else if (action === "qr") {
         const res = await this._hass.callWS({ type: "qr_guest_access/qr", token_id: id });
         const token = this._data.tokens.find((t) => t.id === id);
         this._openModal(token ? token.name : "QR", res);
@@ -664,6 +690,62 @@ class QRGuestAccessPanel extends HTMLElement {
     this._q("#modal").hidden = true;
     this._q("#modalBody").innerHTML = "";
     this._modalImage = null;
+  }
+
+  _openEdit(id) {
+    const t = this._data && this._data.tokens.find((x) => x.id === id);
+    if (!t) return;
+    this._editId = id;
+    const unlimited = t.max_uses === null;
+    this._q("#editTitle").textContent = `Modifica "${t.name}"`;
+    this._q("#editInfo").textContent = unlimited
+      ? `Usato ${t.uses_count} volte · accessi illimitati`
+      : `Usato ${t.uses_count} ${t.uses_count === 1 ? "volta" : "volte"} · ${t.uses_left} ${t.uses_left === 1 ? "accesso rimasto" : "accessi rimasti"}`;
+    this._q("#editFrom").value = t.valid_from ? toLocalInput(new Date(t.valid_from)) : "";
+    this._q("#editUntil").value = t.valid_until ? toLocalInput(new Date(t.valid_until)) : "";
+    this._q("#editUnlimited").checked = unlimited;
+    this._q("#editUses").value = unlimited ? 1 : Math.max(t.uses_left, 1);
+    this._syncEditUnlimited();
+    this._setMsg("#editMsg", "", false);
+    this._q("#editModal").hidden = false;
+  }
+
+  _closeEdit() {
+    const modal = this._q("#editModal");
+    if (modal) modal.hidden = true;
+    this._editId = null;
+  }
+
+  _syncEditUnlimited() {
+    this._q("#editUses").disabled = this._q("#editUnlimited").checked;
+  }
+
+  async _saveEdit() {
+    if (!this._editId) return;
+    const from = this._q("#editFrom").value;
+    const until = this._q("#editUntil").value;
+    const unlimited = this._q("#editUnlimited").checked;
+    const uses = parseInt(this._q("#editUses").value, 10);
+    if (!unlimited && !Number.isInteger(uses)) return this._setMsg("#editMsg", "Indica il numero di accessi.", true);
+
+    const btn = this._q("#editSave");
+    btn.disabled = true;
+    this._setMsg("#editMsg", "Salvo…", false);
+    try {
+      await this._hass.callWS({
+        type: "qr_guest_access/update",
+        token_id: this._editId,
+        valid_from: from ? new Date(from).toISOString() : null,
+        valid_until: until ? new Date(until).toISOString() : null,
+        uses_left: unlimited ? null : uses,
+      });
+      this._closeEdit();
+      await this._refresh();
+    } catch (err) {
+      this._setMsg("#editMsg", (err && err.message) || "Salvataggio non riuscito.", true);
+    } finally {
+      btn.disabled = false;
+    }
   }
 
   async _toggleTest(input) {

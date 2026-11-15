@@ -123,6 +123,35 @@ def ws_restore(hass: HomeAssistant, connection: websocket_api.ActiveConnection, 
 
 @websocket_api.require_admin
 @websocket_api.websocket_command(
+    {
+        vol.Required("type"): "qr_guest_access/update",
+        vol.Required("token_id"): str,
+        vol.Optional("valid_from"): vol.Any(str, None),
+        vol.Optional("valid_until"): vol.Any(str, None),
+        vol.Optional("uses_left"): vol.Any(int, None),
+    }
+)
+@callback
+def ws_update(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    if (manager := _get_manager(hass, connection, msg)) is None:
+        return
+    changes: dict[str, Any] = {}
+    try:
+        if "valid_from" in msg:
+            changes["valid_from"] = to_utc(msg["valid_from"])
+        if "valid_until" in msg:
+            changes["valid_until"] = to_utc(msg["valid_until"])
+        if "uses_left" in msg:
+            changes["uses_left"] = msg["uses_left"]
+        token = manager.engine.update_token(msg["token_id"], **changes)
+    except ValueError as err:
+        connection.send_error(msg["id"], "invalid_format", str(err))
+        return
+    connection.send_result(msg["id"], {"token": token})
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
     {vol.Required("type"): "qr_guest_access/delete", vol.Required("token_id"): str}
 )
 @callback
@@ -187,6 +216,7 @@ def async_register_api(hass: HomeAssistant) -> None:
         ws_qr,
         ws_revoke,
         ws_restore,
+        ws_update,
         ws_delete,
         ws_simulate,
         ws_set_test_mode,

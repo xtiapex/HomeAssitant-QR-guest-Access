@@ -236,6 +236,106 @@ class TestRestore(Base):
         self.assertFalse(self.saved[-1]["tokens"][public["id"]]["revoked"])
 
 
+class TestUpdate(Base):
+    def view(self, token_id):
+        return {t["id"]: t for t in self.eng.get_state()["tokens"]}[token_id]
+
+    async def test_renew_exhausted_token_with_more_accesses(self):
+        public, code = self.token(max_uses=1)
+        await self.scan(code)
+        self.assertEqual((await self.scan(code)).result, engine.RESULT_EXHAUSTED)
+        updated = self.eng.update_token(public["id"], uses_left=3)
+        self.assertEqual((updated["uses_left"], updated["max_uses"], updated["uses_count"]), (3, 4, 1))
+        self.assertEqual(updated["status"], engine.STATUS_ACTIVE)
+        results = [(await self.scan(code)).result for _ in range(4)]
+        self.assertEqual(results, [engine.RESULT_GRANTED] * 3 + [engine.RESULT_EXHAUSTED])
+
+    async def test_extend_expired_token(self):
+        public, code = self.token(max_uses=5, valid_until=T0 + timedelta(hours=1))
+        self.clock.advance(hours=2)
+        self.assertEqual((await self.scan(code)).result, engine.RESULT_EXPIRED)
+        self.eng.update_token(public["id"], valid_until=self.clock.now + timedelta(days=1))
+        self.assertEqual((await self.scan(code)).result, engine.RESULT_GRANTED)
+
+    async def test_move_start_date_later_makes_token_pending(self):
+        public, code = self.token()
+        self.eng.update_token(public["id"], valid_from=T0 + timedelta(hours=3))
+        self.assertEqual(self.view(public["id"])["status"], engine.STATUS_PENDING)
+        self.assertEqual((await self.scan(code)).result, engine.RESULT_NOT_STARTED)
+
+    def test_unspecified_fields_are_left_alone(self):
+        public, _ = self.token(max_uses=4, valid_until=T0 + timedelta(days=2))
+        before = self.view(public["id"])
+        self.eng.update_token(public["id"], uses_left=2)
+        after = self.view(public["id"])
+        self.assertEqual((after["valid_from"], after["valid_until"]), (before["valid_from"], before["valid_until"]))
+        self.assertEqual(after["uses_left"], 2)
+
+    def test_valid_from_none_means_keep(self):
+        public, _ = self.token(valid_from=T0 + timedelta(hours=1))
+        before = self.view(public["id"])["valid_from"]
+        self.eng.update_token(public["id"], valid_from=None, uses_left=2)
+        self.assertEqual(self.view(public["id"])["valid_from"], before)
+
+    def test_remove_end_date_for_limited_token(self):
+        public, _ = self.token(max_uses=3, valid_until=T0 + timedelta(days=1))
+        self.eng.update_token(public["id"], valid_until=None)
+        self.assertIsNone(self.view(public["id"])["valid_until"])
+
+    def test_switch_to_unlimited_requires_end_date(self):
+        public, _ = self.token(max_uses=3, valid_until=None)
+        with self.assertRaises(ValueError):
+            self.eng.update_token(public["id"], uses_left=None)
+        self.assertEqual(self.view(public["id"])["uses_left"], 3)  # nulla è cambiato
+        updated = self.eng.update_token(public["id"], uses_left=None, valid_until=T0 + timedelta(days=1))
+        self.assertIsNone(updated["max_uses"])
+        self.assertIsNone(updated["uses_left"])
+
+    def test_unlimited_back_to_limited_keeps_usage_count(self):
+        public, _ = self.token(max_uses=None, valid_until=T0 + timedelta(days=1))
+        self.eng._data["tokens"][public["id"]]["uses_count"] = 7
+        updated = self.eng.update_token(public["id"], uses_left=2)
+        self.assertEqual((updated["uses_left"], updated["max_uses"]), (2, 9))
+
+    def test_invalid_changes_are_rejected_and_change_nothing(self):
+        public, _ = self.token(max_uses=2, valid_until=T0 + timedelta(days=1))
+        before = self.eng.snapshot()["tokens"][public["id"]]
+        bad = [
+            dict(uses_left=0), dict(uses_left=1000), dict(uses_left=True), dict(uses_left=1.5),
+            dict(valid_until=T0 - timedelta(minutes=1)),            # già passata
+            dict(valid_from=T0 + timedelta(days=2)),                # inizio dopo la fine attuale
+            dict(valid_until=T0 - timedelta(days=5), valid_from=T0 - timedelta(days=9)),
+        ]
+        for changes in bad:
+            with self.subTest(changes=changes):
+                with self.assertRaises(ValueError):
+                    self.eng.update_token(public["id"], **changes)
+        self.assertEqual(self.eng.snapshot()["tokens"][public["id"]], before)
+
+    def test_unknown_token(self):
+        with self.assertRaises(ValueError):
+            self.eng.update_token("nope", uses_left=2)
+
+    async def test_editing_other_fields_of_an_expired_token_is_allowed(self):
+        public, code = self.token(max_uses=2, valid_until=T0 + timedelta(hours=1))
+        self.clock.advance(hours=3)  # ora è scaduto
+        self.eng.update_token(public["id"], uses_left=5)  # la fine (passata) non cambia: nessun errore
+        self.assertEqual(self.view(public["id"])["status"], engine.STATUS_EXPIRED)
+
+    def test_revoked_token_stays_revoked_after_edit(self):
+        public, _ = self.token(max_uses=1)
+        self.eng.revoke_token(public["id"])
+        self.eng.update_token(public["id"], uses_left=4)
+        self.assertEqual(self.view(public["id"])["status"], engine.STATUS_REVOKED)
+
+    def test_update_is_persisted_and_secret_not_exposed(self):
+        public, code = self.token()
+        updated = self.eng.update_token(public["id"], uses_left=6)
+        self.assertEqual(self.saved[-1]["tokens"][public["id"]]["uses_left"], 6)
+        self.assertNotIn("token", updated)
+        self.assertEqual(self.eng.token_secret(public["id"]), code)  # il QR non cambia
+
+
 class TestDoorAndModes(Base):
     async def test_door_failure_refunds_the_access(self):
         public, code = self.token(max_uses=2)

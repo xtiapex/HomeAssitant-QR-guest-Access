@@ -14,6 +14,7 @@ from .manager import Manager
 SERVICE_CREATE_QR = "create_qr"
 SERVICE_REVOKE_QR = "revoke_qr"
 SERVICE_RESTORE_QR = "restore_qr"
+SERVICE_UPDATE_QR = "update_qr"
 SERVICE_SIMULATE_SCAN = "simulate_scan"
 
 CREATE_SCHEMA = vol.Schema(
@@ -27,6 +28,15 @@ CREATE_SCHEMA = vol.Schema(
 )
 REVOKE_SCHEMA = vol.Schema({vol.Required("id"): cv.string})
 SIMULATE_SCHEMA = vol.Schema({vol.Required("code"): cv.string})
+UPDATE_SCHEMA = vol.Schema(
+    {
+        vol.Required("id"): cv.string,
+        vol.Optional("valid_from"): vol.Any(None, cv.string),
+        vol.Optional("valid_until"): vol.Any(None, cv.string),
+        vol.Optional("uses_left"): vol.All(vol.Coerce(int)),
+        vol.Optional("unlimited", default=False): cv.boolean,
+    }
+)
 
 
 def _manager(hass: HomeAssistant) -> Manager:
@@ -62,6 +72,25 @@ async def _handle_restore(call: ServiceCall) -> None:
         raise ServiceValidationError("Token non trovato o non revocato.")
 
 
+async def _handle_update(call: ServiceCall) -> ServiceResponse:
+    manager = _manager(call.hass)
+    changes: dict = {}
+    try:
+        # I campi vuoti si ignorano: da un'automazione non si cancella per sbaglio una scadenza.
+        if call.data.get("valid_from"):
+            changes["valid_from"] = to_utc(call.data["valid_from"])
+        if call.data.get("valid_until"):
+            changes["valid_until"] = to_utc(call.data["valid_until"])
+        if call.data["unlimited"]:
+            changes["uses_left"] = None
+        elif "uses_left" in call.data:
+            changes["uses_left"] = call.data["uses_left"]
+        token = manager.engine.update_token(call.data["id"], **changes)
+    except ValueError as err:
+        raise ServiceValidationError(str(err)) from err
+    return dict(token) if call.return_response else None
+
+
 async def _handle_simulate(call: ServiceCall) -> ServiceResponse:
     manager = _manager(call.hass)
     result = await manager.async_simulate(None, call.data["code"])
@@ -84,6 +113,13 @@ def async_register_services(hass: HomeAssistant) -> None:
     )
     hass.services.async_register(
         DOMAIN, SERVICE_RESTORE_QR, _handle_restore, schema=REVOKE_SCHEMA
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_UPDATE_QR,
+        _handle_update,
+        schema=UPDATE_SCHEMA,
+        supports_response=SupportsResponse.OPTIONAL,
     )
     hass.services.async_register(
         DOMAIN,

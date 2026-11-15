@@ -66,6 +66,17 @@
         "id": { "name": "ID", "description": "L'ID del QR revocato." }
       }
     },
+    "update_qr": {
+      "name": "Modifica QR",
+      "description": "Cambia date e accessi di un QR. I campi lasciati vuoti restano come sono.",
+      "fields": {
+        "id": { "name": "ID", "description": "L'ID del QR." },
+        "valid_from": { "name": "Valido dal", "description": "Nuovo inizio di validità." },
+        "valid_until": { "name": "Valido fino al", "description": "Nuova fine di validità." },
+        "uses_left": { "name": "Accessi disponibili", "description": "Quanti accessi restano da adesso." },
+        "unlimited": { "name": "Accessi illimitati", "description": "Rende gli accessi illimitati (serve una data di fine)." }
+      }
+    },
     "simulate_scan": {
       "name": "Simula scansione",
       "description": "Esegue la stessa procedura di una lettura della telecamera.",

@@ -94,7 +94,7 @@ All'installazione la **modalità test è attiva**: i QR validi vengono riconosci
 - L'accesso viene scalato **prima** di aprire la porta; se l'apertura fallisce, viene restituito.
 - Lo stesso QR letto più volte in 10 secondi conta una volta sola.
 - I QR contengono solo un codice casuale (`QG-` + 32 caratteri), mai nomi o dati.
-- Un token non si modifica: se serve cambiare qualcosa, revoca e crea un nuovo QR.
+- Di un QR già creato puoi cambiare **date e accessi** con il pulsante *Modifica*: nuovo inizio, nuova fine, quanti accessi restano **da adesso** (gli usi già fatti restano nello storico), oppure accessi illimitati (serve una data di fine). Così puoi rinnovare un QR scaduto o esaurito: torna attivo se le nuove date e i nuovi accessi lo permettono. Il nome e il codice del QR non cambiano, quindi il PNG già scaricato o stampato continua a valere.
 - Un QR revocato si può **riabilitare** dal pannello (pulsante *Riabilita*): torna com'era, con gli stessi accessi rimasti. Se nel frattempo è scaduto o esaurito, resta tale.
 - Gli orari nel pannello sono quelli del dispositivo che usi; nei servizi di HA, quelli del fuso orario di Home Assistant.
 
@@ -121,7 +121,7 @@ automation:
 
 **Sensori**: QR attivi, accessi consentiti, accessi negati, ultimo accesso.
 
-**Azioni**: `qr_guest_access.create_qr` (nome, valido dal/fino al, numero di accessi, illimitati; restituisce i dati del token), `qr_guest_access.revoke_qr`, `qr_guest_access.restore_qr`, `qr_guest_access.simulate_scan`. Senza indicazioni `create_qr` crea un QR **monouso**.
+**Azioni**: `qr_guest_access.create_qr` (nome, valido dal/fino al, numero di accessi, illimitati; restituisce i dati del token), `qr_guest_access.revoke_qr`, `qr_guest_access.restore_qr`, `qr_guest_access.update_qr` (i campi lasciati vuoti restano com'erano), `qr_guest_access.simulate_scan`. Senza indicazioni `create_qr` crea un QR **monouso**.
 
 ## 6. Sicurezza: cosa sapere
 

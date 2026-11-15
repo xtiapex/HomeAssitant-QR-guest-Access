@@ -66,6 +66,17 @@
         "id": { "name": "ID", "description": "The ID of the revoked QR code." }
       }
     },
+    "update_qr": {
+      "name": "Edit QR",
+      "description": "Changes the dates and accesses of a QR code. Empty fields are left unchanged.",
+      "fields": {
+        "id": { "name": "ID", "description": "The QR code ID." },
+        "valid_from": { "name": "Valid from", "description": "New start of validity." },
+        "valid_until": { "name": "Valid until", "description": "New end of validity." },
+        "uses_left": { "name": "Accesses available", "description": "How many accesses remain from now on." },
+        "unlimited": { "name": "Unlimited accesses", "description": "Makes accesses unlimited (requires an end date)." }
+      }
+    },
     "simulate_scan": {
       "name": "Simulate scan",
       "description": "Runs the same procedure as a camera reading.",

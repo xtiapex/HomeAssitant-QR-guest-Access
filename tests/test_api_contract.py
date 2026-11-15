@@ -36,11 +36,14 @@ class ApiContract(unittest.TestCase):
         used |= {"qr_guest_access/revoke", "qr_guest_access/delete"}
         self.assertIn('type: "qr_guest_access/restore", token_id: id', PANEL)
         used.add("qr_guest_access/restore")
+        self.assertIn('type: "qr_guest_access/update",\n        token_id: this._editId', PANEL)
+        used.add("qr_guest_access/update")
         self.assertTrue(used <= registered, f"non registrati: {used - registered}")
 
     def test_commands_that_take_a_token_use_token_id_on_both_sides(self):
         for command in ("qr", "revoke", "restore", "delete"):
             self.assertRegex(API, rf'"qr_guest_access/{command}", vol\.Required\("token_id"\)')
+        self.assertRegex(API, r'"qr_guest_access/update",\s*vol\.Required\("token_id"\)')
         self.assertIn('type: "qr_guest_access/qr", token_id: id', PANEL)
         self.assertIn("type: `qr_guest_access/${action}`, token_id: id", PANEL)
 
